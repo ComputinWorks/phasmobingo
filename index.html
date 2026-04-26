@@ -1,0 +1,1934 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#060608">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>PhasmoBingo</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Spectral+SC:wght@400;600&family=Spectral:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.cdnfonts.com/css/october-crow" rel="stylesheet">
+  <link href="https://fonts.cdnfonts.com/css/lazy-dog" rel="stylesheet">
+  <script src="https://cdn.socket.io/4.8.3/socket.io.min.js" integrity="sha384-kzavj5fiMwLKzzD1f8S7TeoVIEi7uKHvbTA3ueZkrzYq75pNQUiUi6Dy98Q3fxb0" crossorigin="anonymous"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:            #060608;
+      --bg2:           #0e0e12;
+      --bg3:           #15151c;
+      --border:        rgba(120,120,180,0.15);
+      --border-hover:  rgba(120,120,180,0.35);
+      --text:          #d8d8e8;
+      --text-dim:      #9090b0;
+      --muted:         #555570;
+
+      --marked:        #1a8f68;
+      --marked-border: #0d5e43;
+      --marked-text:   #c8f0e0;
+      --marked-glow:   rgba(26,143,104,0.3);
+
+      --bingo:         #a06010;
+      --bingo-border:  #704008;
+      --bingo-text:    #f5dfa0;
+      --bingo-glow:    rgba(160,96,16,0.35);
+
+      --free:          #1a3a6a;
+      --free-border:   #0d2448;
+      --free-text:     #a8c8f0;
+
+      --accent:        #7060cc;
+      --accent-glow:   rgba(112,96,204,0.25);
+
+      --danger-bg:     #1a0f0a;
+      --danger-border: #6a2e10;
+      --danger-text:   #f0c8a0;
+
+      --wrong-bg:      rgba(226,75,74,0.15);
+      --wrong-border:  #a32d2d;
+      --wrong-text:    #f09595;
+
+      --sidebar-w:     clamp(90px, 12vw, 130px);
+
+      --pad-v:         clamp(0.5rem, 1.5vh, 1.25rem);
+      --pad-h:         clamp(0.75rem, 2vw, 1.5rem);
+      --safe-bottom:   env(safe-area-inset-bottom, 0px);
+
+      --font-title:    'October Crow', serif;
+      --font-display:  'Lazy Dog', 'Spectral SC', serif;
+      --font-ui:       'Spectral SC', Georgia, serif;
+      --font-body:     'Spectral', Georgia, serif;
+    }
+
+    /* ── BASE ── */
+    html, body {
+      height: 100%;
+      height: 100dvh;
+      -webkit-text-size-adjust: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: var(--font-ui);
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      position: relative;
+    }
+
+    /* ── FONDO ── */
+    #fog-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.55;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% 100%, rgba(40,20,80,0.18) 0%, transparent 70%),
+        radial-gradient(ellipse 60% 40% at 50% 0%,   rgba(10,10,30,0.6)  0%, transparent 80%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    #particles {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      overflow: hidden;
+    }
+
+    .particle {
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(180,200,255,0.5);
+      animation: floatUp linear infinite;
+    }
+
+    @keyframes floatUp {
+      0%   { transform: translateY(0) translateX(0) scale(1); opacity: 0; }
+      10%  { opacity: 1; }
+      90%  { opacity: 0.4; }
+      100% { transform: translateY(-100vh) translateX(var(--drift)) scale(0.4); opacity: 0; }
+    }
+
+    #welcome, #board { position: relative; z-index: 2; }
+
+    .screen {
+      position: relative;
+      z-index: 2;
+    }
+
+    /* Contenedor que centra todas las pantallas */
+    #app {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      visibility: hidden; /* se hace visible en initPage() para evitar flash */
+    }
+
+    /* ══════════════════════════════════════
+       PANTALLAS DE ESTADO — base compartida
+       (auth, expirado, inválido, finalizado)
+    ══════════════════════════════════════ */
+    .screen {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: clamp(0.8rem, 2vh, 1.4rem);
+      text-align: center;
+      width: min(400px, 92vw);
+      padding: 0 0.5rem;
+    }
+
+    .screen h1 {
+      font-family: var(--font-title);
+      font-size: clamp(32px, 8vw, 54px);
+      font-weight: normal;
+      letter-spacing: 0.08em;
+      line-height: 1.1;
+      color: #e0d8f8;
+      text-shadow: 0 0 30px rgba(140,120,255,0.4), 0 0 60px rgba(100,80,220,0.2);
+    }
+
+    .screen .subtitle {
+      font-family: var(--font-display);
+      font-size: clamp(11px, 1.4vw, 13px);
+      color: var(--text-dim);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 6px 0;
+      width: 100%;
+    }
+
+    .screen .msg {
+      font-family: var(--font-body);
+      font-size: clamp(13px, 1.6vw, 15px);
+      color: var(--text-dim);
+      line-height: 1.6;
+      letter-spacing: 0.03em;
+    }
+
+    .screen .msg strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    /* Icono grande decorativo */
+    .screen .status-icon {
+      font-size: clamp(36px, 8vw, 52px);
+      line-height: 1;
+      opacity: 0.7;
+    }
+
+    /* Botón primario (Entrar con Twitch) */
+    .screen .btn-primary {
+      width: 100%;
+      font-family: var(--font-display);
+      font-size: clamp(13px, 1.6vw, 15px);
+      letter-spacing: 0.1em;
+      padding: 13px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 1px solid rgba(169,112,255,0.55);
+      background: rgba(169,112,255,0.1);
+      color: #d0b8ff;
+      transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.1s;
+      min-height: 48px;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .screen .btn-primary:hover {
+      background: rgba(169,112,255,0.2);
+      border-color: rgba(169,112,255,0.85);
+      box-shadow: 0 0 18px rgba(169,112,255,0.25);
+    }
+    .screen .btn-primary:active { transform: scale(0.97); }
+
+    .screen .btn-primary svg {
+      width: 18px; height: 18px;
+      fill: currentColor;
+      flex-shrink: 0;
+    }
+
+    /* Nota al pie de pantalla */
+    .screen .screen-note {
+      font-family: var(--font-ui);
+      font-size: clamp(10px, 1.1vw, 11px);
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      line-height: 1.5;
+    }
+
+    /* Variante roja para link expirado / inválido */
+    .screen.screen-danger .status-icon { color: var(--danger-text); opacity: 0.6; }
+    .screen.screen-danger .msg { color: #c8a080; }
+
+    /* Variante ámbar para bingo finalizado */
+    .screen.screen-ended .status-icon { color: var(--bingo-text); opacity: 0.7; }
+    .screen.screen-ended .msg { color: #d8c080; }
+
+    /* ── Pantalla de bienvenida original (se mantiene por compatibilidad de debug) ── */
+    #welcome {
+      display: none; /* oculta por defecto; solo se muestra si no hay token en URL */
+      flex-direction: column;
+      align-items: center;
+      gap: clamp(0.8rem, 2vh, 1.4rem);
+      text-align: center;
+      width: min(380px, 92vw);
+      padding: 0 0.5rem;
+    }
+    #welcome h1 {
+      font-family: var(--font-title);
+      font-size: clamp(32px, 8vw, 54px);
+      font-weight: normal;
+      letter-spacing: 0.08em;
+      line-height: 1.1;
+      color: #e0d8f8;
+      text-shadow: 0 0 30px rgba(140,120,255,0.4), 0 0 60px rgba(100,80,220,0.2);
+    }
+    #welcome .subtitle {
+      font-family: var(--font-display);
+      font-size: clamp(11px, 1.4vw, 13px);
+      color: var(--text-dim);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 6px 0;
+      width: 100%;
+    }
+    #welcome input[type="text"] {
+      width: 100%;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-size: 16px;
+      font-family: var(--font-body);
+      color: var(--text);
+      outline: none;
+      text-align: center;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      -webkit-appearance: none;
+      letter-spacing: 0.05em;
+    }
+    #welcome input[type="text"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    #welcome input[type="text"]::placeholder { color: var(--muted); }
+    #start-btn {
+      width: 100%;
+      font-family: var(--font-display);
+      font-size: clamp(13px, 1.6vw, 16px);
+      letter-spacing: 0.12em;
+      padding: 12px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 1px solid rgba(112,96,204,0.5);
+      background: rgba(112,96,204,0.08);
+      color: #b0a0f0;
+      transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.1s;
+      min-height: 48px;
+      text-transform: uppercase;
+    }
+    #start-btn:hover {
+      background: rgba(112,96,204,0.18);
+      border-color: rgba(112,96,204,0.8);
+      box-shadow: 0 0 16px var(--accent-glow);
+    }
+    #start-btn:active { transform: scale(0.97); }
+
+    /* ══════════════════════════════════════
+       TABLERO — layout flex columna exacto
+       Todo cabe en 100dvh sin scroll
+    ══════════════════════════════════════ */
+    #board {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100dvh;
+      padding: var(--pad-v) var(--pad-h) calc(var(--pad-v) + var(--safe-bottom));
+      overflow: hidden;
+      gap: clamp(4px, 0.8vh, 10px);
+    }
+
+    /* ── Zona central: sidebar + grid side by side, compacto y centrado ── */
+    #board-center {
+      flex: 0 0 auto;
+      min-height: 0;
+      min-width: 0;
+      display: flex;
+      flex-direction: row;
+      align-items: flex-start;
+      justify-content: center;
+      gap: clamp(6px, 1vw, 12px);
+      width: 100%;
+    }
+
+    /* ══════════════════════════════════════
+       SIDEBAR DE CANTADOS
+    ══════════════════════════════════════ */
+    #called-sidebar {
+      flex: 0 0 var(--sidebar-w);
+      display: flex;
+      flex-direction: column;
+      background: rgba(255,255,255,0.025);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      height: min(calc(100dvh - 250px), calc(100vw - var(--sidebar-w) * 2 - 60px));
+    }
+
+    #called-sidebar .sb-header {
+      flex: 0 0 auto;
+      padding: clamp(5px,0.7vh,9px) 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #called-sidebar .sb-title {
+      font-family: var(--font-ui);
+      font-size: clamp(8px, 0.9vw, 11px);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    #called-sidebar .sb-count {
+      font-family: var(--font-ui);
+      font-size: clamp(9px, 1vw, 12px);
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+
+    #called-list {
+      flex: 1 1 0;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(120,120,180,0.2) transparent;
+    }
+    #called-list::-webkit-scrollbar { width: 3px; }
+    #called-list::-webkit-scrollbar-thumb { background: rgba(120,120,180,0.25); border-radius: 2px; }
+
+    .ghost-tag {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(26,143,104,0.12);
+      border: 1px solid rgba(13,94,67,0.5);
+      border-radius: 4px;
+      padding: clamp(3px,0.4vh,5px) 6px;
+      font-family: var(--font-ui);
+      font-size: clamp(8px, 0.95vw, 11px);
+      color: #a8e8cc;
+      animation: slideIn .3s cubic-bezier(.2,.8,.3,1) both;
+      flex-shrink: 0;
+    }
+
+    .ghost-tag.latest {
+      background: rgba(26,143,104,0.25);
+      border-color: #1a8f68;
+      color: #d8f8ec;
+    }
+
+    .ghost-tag .sb-dot {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: #1a8f68;
+      flex-shrink: 0;
+    }
+    .ghost-tag.latest .sb-dot {
+      background: #4dffc0;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    .ghost-tag .sb-num {
+      font-size: clamp(7px, 0.8vw, 9px);
+      color: #4a9a7a;
+      flex-shrink: 0;
+      margin-left: auto;
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes pulse {
+      0%,100% { opacity:1; transform:scale(1); }
+      50%      { opacity:.4; transform:scale(.7); }
+    }
+
+    /* ── Barra compacta de cantados en móvil portrait estrecho ── */
+    #called-bar {
+      display: none;
+      flex: 0 0 auto;
+      width: 100%;
+      max-width: 820px;
+      margin-inline: auto;
+      background: rgba(255,255,255,0.025);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 8px;
+      margin-bottom: clamp(3px, 0.5vh, 6px);
+      overflow: hidden;
+    }
+    #called-bar .bar-title {
+      font-family: var(--font-ui);
+      font-size: 9px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-right: 6px;
+      flex-shrink: 0;
+    }
+    #called-bar-inner {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+      align-items: center;
+    }
+    #called-bar-inner .ghost-tag {
+      animation: none;
+      padding: 2px 5px;
+      font-size: 9px;
+    }
+    #called-bar-inner .ghost-tag .sb-num { display: none; }
+
+    /* ══════════════════════════════════════
+       PANEL DERECHO — TABLA DE POSICIONES
+    ══════════════════════════════════════ */
+    #leaderboard-sidebar {
+      flex: 0 0 var(--sidebar-w);
+      display: flex;
+      flex-direction: column;
+      background: rgba(255,255,255,0.025);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      height: min(calc(100dvh - 250px), calc(100vw - var(--sidebar-w) * 2 - 60px));
+    }
+    #leaderboard-sidebar .sb-header {
+      flex: 0 0 auto;
+      padding: clamp(5px,0.7vh,9px) 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    #leaderboard-sidebar .sb-title {
+      font-family: var(--font-ui);
+      font-size: clamp(8px, 0.9vw, 11px);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    #leaderboard-sidebar .sb-count {
+      font-family: var(--font-ui);
+      font-size: clamp(9px, 1vw, 12px);
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+    #leaderboard-list {
+      flex: 1 1 0;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(120,120,180,0.2) transparent;
+    }
+    #leaderboard-list::-webkit-scrollbar { width: 3px; }
+    #leaderboard-list::-webkit-scrollbar-thumb { background: rgba(120,120,180,0.25); border-radius: 2px; }
+
+    .lb-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(112,96,204,0.08);
+      border: 1px solid rgba(112,96,204,0.2);
+      border-radius: 4px;
+      padding: clamp(3px,0.4vh,5px) 6px;
+      font-family: var(--font-ui);
+      font-size: clamp(8px, 0.95vw, 11px);
+      color: #c0b8f0;
+      flex-shrink: 0;
+    }
+    .lb-row.rank-1 { background: rgba(160,96,16,0.2); border-color: rgba(160,96,16,0.5); color: var(--bingo-text); }
+    .lb-row.rank-2 { background: rgba(160,160,160,0.12); border-color: rgba(160,160,160,0.35); color: #d8d8e8; }
+    .lb-row.rank-3 { background: rgba(160,96,48,0.12); border-color: rgba(160,96,48,0.35); color: #e8c8a8; }
+    .lb-row.updated { animation: flashUpdate .7s ease both; }
+    .lb-rank { font-size: clamp(7px,0.8vw,10px); flex-shrink:0; width:14px; text-align:center; opacity:.7; }
+    .lb-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .lb-pts  { font-size: clamp(7px,0.8vw,9px); flex-shrink:0; opacity:.8; }
+
+    @keyframes flashUpdate {
+      0%   { background: rgba(26,143,104,0.4); border-color: #1a8f68; }
+      100% { }
+    }
+    @keyframes slideInRight {
+      from { opacity:0; transform:translateX(10px); }
+      to   { opacity:1; transform:translateX(0); }
+    }
+
+    @media (max-width: 500px) and (orientation: portrait) {
+      #leaderboard-sidebar { display: none; }
+    }
+    @media (max-height: 480px) and (orientation: landscape) {
+      #leaderboard-sidebar { flex: 0 0 clamp(70px, 10vw, 100px); }
+    }
+
+    /* ── Header: tamaño fijo, no crece ni encoge ── */
+    #board header {
+      flex: 0 0 auto;
+      text-align: center;
+      width: 100%;
+      max-width: 700px;
+      margin-bottom: clamp(0.3rem, 0.8vh, 0.7rem);
+    }
+
+    #board header h1 {
+      font-family: var(--font-title);
+      font-size: clamp(20px, 4vw, 38px);
+      font-weight: normal;
+      letter-spacing: 0.08em;
+      color: #e0d8f8;
+      text-shadow: 0 0 24px rgba(140,120,255,0.35);
+      line-height: 1;
+    }
+
+    #seed-label {
+      font-family: var(--font-ui);
+      font-size: clamp(10px, 1.1vw, 12px);
+      font-weight: 400;
+      color: var(--muted);
+      margin-top: 3px;
+      letter-spacing: 0.1em;
+    }
+
+    #seed-label .username {
+      font-family: var(--font-display);
+      font-weight: 700;
+      color: var(--text);
+      font-size: clamp(12px, 1.4vw, 15px);
+      text-transform: none;
+      vertical-align: middle;
+      line-height: 1;
+      position: relative;
+      top: -1px;
+    }
+
+    /* ── Banners: tamaño fijo, no crecen ── */
+    .banner {
+      flex: 0 0 auto;
+      display: none;
+      border-radius: 6px;
+      padding: clamp(4px, 0.6vh, 8px) 16px;
+      font-family: var(--font-ui);
+      font-size: clamp(11px, 1.2vw, 13px);
+      letter-spacing: 0.08em;
+      margin-bottom: clamp(0.3rem, 0.6vh, 0.5rem);
+      text-align: center;
+      width: 100%;
+      max-width: 700px;
+      line-height: 1.4;
+    }
+
+    .readonly-banner {
+      background: var(--danger-bg);
+      border: 1px solid var(--danger-border);
+      color: var(--danger-text);
+    }
+
+    .bingo-msg {
+      background: rgba(26,143,104,0.12);
+      border: 1px solid var(--marked);
+      color: var(--marked-text);
+      font-family: var(--font-display);
+      font-size: clamp(16px, 2.2vw, 24px);
+      letter-spacing: 0.2em;
+      text-shadow: 0 0 12px var(--marked-glow);
+    }
+
+    /* ── Grid: cuadrado centrado, tamaño basado en altura disponible ── */
+    .grid {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      grid-template-rows: repeat(5, 1fr);
+      gap: clamp(3px, 0.6vmin, 7px);
+      /* 
+        Resta del viewport:
+        - padding top+bottom: ~2 * var(--pad-v) ≈ 40px
+        - header (título + subtítulo): ~70px
+        - acciones (botón): ~50px
+        - footer (crédito + iconos): ~60px
+        - gaps entre elementos: ~30px
+        Total a restar: ~250px
+      */
+      --grid-size: min(
+        calc(100dvh - 250px),
+        calc(100vw - var(--sidebar-w) * 2 - 60px)
+      );
+      width:  var(--grid-size);
+      height: var(--grid-size);
+      align-self: center;
+    }
+
+    /* ── Celdas ── */
+    .cell {
+      background: rgba(255,255,255,0.025);
+      border: 1px solid var(--border);
+      border-radius: clamp(3px, 0.5vmin, 6px);
+      font-family: var(--font-display);
+      /* fuente relativa al tamaño de la celda con vmin */
+      font-size: clamp(10px, 2.8vmin, 20px);
+      color: var(--text);
+      cursor: pointer;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s,
+                  box-shadow 0.15s, transform 0.08s;
+      user-select: none;
+      line-height: 1.2;
+      word-break: break-word;
+      hyphens: auto;
+      letter-spacing: 0.02em;
+      overflow: hidden;
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      .cell:hover:not(.free):not(.readonly) {
+        background: rgba(255,255,255,0.06);
+        border-color: var(--border-hover);
+        color: var(--text);
+      }
+    }
+    .cell:active:not(.free):not(.readonly) { transform: scale(0.93); }
+
+    .cell.marked {
+      background: rgba(26,143,104,0.2);
+      border-color: var(--marked-border);
+      color: var(--marked-text);
+      font-weight: 600;
+      box-shadow: inset 0 0 12px rgba(26,143,104,0.15);
+    }
+
+    .cell.bingo-line {
+      background: rgba(160,96,16,0.25);
+      border-color: var(--bingo-border);
+      color: var(--bingo-text);
+      font-weight: 600;
+      box-shadow: inset 0 0 14px rgba(160,96,16,0.2), 0 0 8px var(--bingo-glow);
+    }
+
+    .cell.free {
+      background: rgba(26,58,106,0.35);
+      border-color: var(--free-border);
+      color: var(--free-text);
+      font-family: var(--font-display);
+      font-size: clamp(11px, 2.8vmin, 20px);
+      cursor: default;
+      letter-spacing: 0.08em;
+    }
+
+    .cell.readonly        { cursor: default; }
+    .cell.readonly:active { transform: none; }
+
+    /* Celda marcada pero NO cantada → rojo */
+    .cell.wrong {
+      background: var(--wrong-bg);
+      border-color: var(--wrong-border);
+      color: var(--wrong-text);
+      box-shadow: inset 0 0 10px rgba(226,75,74,0.1);
+    }
+
+    /* ── Acciones: tamaño fijo, debajo del grid ── */
+    .actions {
+      flex: 0 0 auto;
+      display: flex;
+      gap: clamp(6px, 1vw, 10px);
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      max-width: 700px;
+      margin-top: clamp(2px, 0.5vh, 8px);
+    }
+
+    button {
+      font-family: var(--font-display);
+      font-size: clamp(11px, 1.3vw, 14px);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: clamp(6px, 0.8vh, 10px) clamp(14px, 2vw, 22px);
+      border-radius: 6px;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      color: var(--text-dim);
+      transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+      min-height: 36px;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      button:hover {
+        background: rgba(255,255,255,0.07);
+        border-color: var(--border-hover);
+        color: var(--text);
+      }
+    }
+    button:active { transform: scale(0.97); }
+
+    #share-btn { border-color: rgba(112,96,204,0.4); color: #b0a0f0; }
+    @media (hover: hover) and (pointer: fine) {
+      #share-btn:hover {
+        background: rgba(112,96,204,0.12);
+        border-color: rgba(112,96,204,0.7);
+        box-shadow: 0 0 12px var(--accent-glow);
+        color: #ccc0ff;
+      }
+    }
+
+    .counter {
+      font-family: var(--font-ui);
+      font-size: clamp(10px, 1.1vw, 12px);
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      width: 100%;
+      text-align: center;
+    }
+
+    .toast {
+      display: none;
+      font-family: var(--font-ui);
+      font-size: clamp(10px, 1.1vw, 12px);
+      letter-spacing: 0.08em;
+      color: var(--marked-text);
+      background: rgba(26,143,104,0.15);
+      border: 1px solid var(--marked-border);
+      border-radius: 6px;
+      padding: 5px 12px;
+    }
+    .toast.show { display: inline-block; }
+
+    /* ── Footer: tamaño fijo ── */
+    footer {
+      flex: 0 0 auto;
+      margin-top: clamp(0.3rem, 0.7vh, 0.6rem);
+      text-align: center;
+      width: 100%;
+      max-width: 700px;
+    }
+
+    .footer-credit {
+      font-family: var(--font-ui);
+      font-size: clamp(9px, 1vw, 11px);
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      opacity: 0.55;
+      margin-bottom: clamp(0.25rem, 0.5vh, 0.4rem);
+    }
+
+    .social-links {
+      display: flex;
+      gap: clamp(12px, 2vw, 20px);
+      justify-content: center;
+      align-items: center;
+    }
+
+    .social-link {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: clamp(22px, 2.5vw, 28px);
+      height: clamp(22px, 2.5vw, 28px);
+      color: var(--muted);
+      opacity: 0.45;
+      transition: opacity 0.2s, color 0.2s, transform 0.15s;
+      text-decoration: none;
+    }
+
+    .social-link svg {
+      width: 100%;
+      height: 100%;
+      fill: currentColor;
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      .social-link:hover               { opacity: 1; transform: translateY(-2px); }
+      .social-link.twitch:hover        { color: #a970ff; }
+      .social-link.youtube:hover       { color: #ff4040; }
+      .social-link.instagram:hover     { color: #c080e0; }
+    }
+    .social-link:active { transform: scale(0.92); opacity: 0.8; }
+
+    /* ══════════════════════════════════════
+       LANDSCAPE MÓVIL
+       En horizontal el grid se limita por altura
+    ══════════════════════════════════════ */
+    @media (max-height: 480px) and (orientation: landscape) {
+      #board { padding: 0.3rem 0.5rem 0.3rem; }
+      #board header h1 { font-size: clamp(16px, 3.5vh, 22px); }
+      #seed-label { display: none; }
+      footer { display: none; }
+      :root { --sidebar-w: clamp(70px, 10vw, 100px); }
+    }
+
+    /* Móvil portrait: sidebar se oculta, aparece barra compacta arriba */
+    @media (max-width: 500px) and (orientation: portrait) {
+      #called-sidebar { display: none; }
+      #called-bar     { display: block; }
+      #board-center   { gap: 0; }
+      .grid {
+        width: min(100%, calc(100dvh - 240px));
+      }
+    }
+
+    /* Pantallas muy pequeñas portrait */
+    @media (max-width: 340px) {
+      .cell { font-size: clamp(9px, 2.5vmin, 14px); }
+    }
+    /* ── GIF DE FONDO ── */
+    #bg-gif-wrap {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    #bg-gif {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+      filter: blur(8px) brightness(0.22) saturate(0.7);
+      transform: scale(1.08); /* cubre bordes del blur */
+      pointer-events: none;
+      will-change: transform;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="fog-canvas"></canvas>
+<div id="particles"></div>
+
+<!-- GIF de fondo loopeado — existe siempre, nunca se reinicia -->
+<div id="bg-gif-wrap">
+  <img id="bg-gif" src="https://i.imgur.com/RD1pVEt.gif" alt="" aria-hidden="true">
+</div>
+
+<!-- ========= PANTALLA: AUTH TWITCH ========= -->
+<div id="app">
+
+<div id="screen-auth" class="screen">
+  <h1>Phasmo<br>Bingo</h1>
+  <p class="subtitle">TheLothricTV</p>
+  <p class="msg">Para acceder a tu tabl&oacute;n necesitas verificar tu identidad con tu cuenta de Twitch.</p>
+  <button class="btn-primary" id="twitch-login-btn">
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/>
+    </svg>
+    Entrar con Twitch
+  </button>
+  <p class="screen-note">Solo se hace una vez por dispositivo.<br>Tus datos no se comparten con nadie.</p>
+</div>
+
+<!-- ========= PANTALLA: LINK EXPIRADO ========= -->
+<div id="screen-expired" class="screen screen-danger">
+  <h1>Phasmo<br>Bingo</h1>
+  <p class="subtitle">TheLothricTV</p>
+  <div class="status-icon">🕯️</div>
+  <p class="msg">Este link ya no est&aacute; activo.<br><strong>El stream en el que fue generado ha finalizado.</strong><br><br>Cuando comience el pr&oacute;ximo stream, escribe <strong>!phasmobingo</strong> en el chat para obtener un nuevo tabl&oacute;n.</p>
+  <p class="screen-note">phasmobingo &mdash; thelothrictv</p>
+</div>
+
+<!-- ========= PANTALLA: LINK INVÁLIDO ========= -->
+<div id="screen-invalid" class="screen screen-danger">
+  <h1>Phasmo<br>Bingo</h1>
+  <p class="subtitle">TheLothricTV</p>
+  <div class="status-icon">👻</div>
+  <p class="msg">Este link no existe.<br><strong>No se encontr&oacute; ning&uacute;n tabl&oacute;n asociado a esta direcci&oacute;n.</strong><br><br>Para participar, escribe <strong>!phasmobingo</strong> en el chat de Twitch durante el stream.</p>
+  <p class="screen-note">phasmobingo &mdash; thelothrictv</p>
+</div>
+
+<!-- ========= PANTALLA: BINGO FINALIZADO ========= -->
+<div id="screen-ended" class="screen screen-ended">
+  <h1>Phasmo<br>Bingo</h1>
+  <p class="subtitle">TheLothricTV</p>
+  <div class="status-icon">🏆</div>
+  <p class="msg"><strong>El bingo de este stream ya finaliz&oacute;.</strong><br><br>Se completaron los 2 bingos disponibles.<br>El pr&oacute;ximo stream habr&aacute; un nuevo bingo.</p>
+  <p class="screen-note">phasmobingo &mdash; thelothrictv</p>
+</div>
+
+<!-- ========= BIENVENIDA (debug) ========= -->
+<div id="welcome">
+  <h1>Phasmo<br>Bingo</h1>
+  <p class="subtitle">Cazadores de Fantasmas</p>
+  <input type="text" id="username-input" placeholder="Tu nombre..."
+         maxlength="30" autocomplete="off" autocorrect="off"
+         autocapitalize="words" spellcheck="false">
+  <button id="start-btn">Nuevo Tablero</button>
+</div>
+
+<!-- ========= TABLERO ========= -->
+<div id="board">
+  <header>
+    <h1>PhasmoBingo</h1>
+    <p id="seed-label"></p>
+  </header>
+
+  <div class="banner readonly-banner" id="readonly-banner"></div>
+  <div class="banner bingo-msg"       id="bingo-msg">Bingo</div>
+
+  <!-- Barra compacta de cantados (solo visible en móvil portrait estrecho) -->
+  <div id="called-bar">
+    <div id="called-bar-inner">
+      <span class="bar-title">Cantados:</span>
+    </div>
+  </div>
+
+  <!-- Zona central: sidebar izquierdo + grid -->
+  <div id="board-center">
+
+    <!-- Sidebar de fantasmas cantados (visible en desktop y móvil landscape) -->
+    <div id="called-sidebar">
+      <div class="sb-header">
+        <div class="sb-title">Cantados</div>
+        <div class="sb-count" id="sb-count">0 fantasmas</div>
+      </div>
+      <div id="called-list"></div>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <!-- Panel derecho: tabla de posiciones -->
+    <div id="leaderboard-sidebar">
+      <div class="sb-header">
+        <div class="sb-title">Posiciones</div>
+        <div class="sb-count" id="lb-count">sin datos</div>
+      </div>
+      <div id="leaderboard-list"></div>
+    </div>
+
+  </div>
+
+  <div class="actions">
+    <button id="share-btn">Compartir Bingo</button>
+    <span class="counter" id="counter"></span>
+    <span class="toast"   id="toast">Link copiado</span>
+  </div>
+
+  <footer>
+    <p class="footer-credit">PhasmoBingo &mdash; TheLothricTV</p>
+    <nav class="social-links" aria-label="Redes sociales">
+
+      <a href="https://www.twitch.tv/thelothrictv" target="_blank" rel="noopener noreferrer"
+         class="social-link twitch" aria-label="Twitch de TheLothricTV" title="Twitch">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/>
+        </svg>
+      </a>
+
+      <a href="https://www.youtube.com/@TheLothricTV" target="_blank" rel="noopener noreferrer"
+         class="social-link youtube" aria-label="YouTube de TheLothricTV" title="YouTube">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+        </svg>
+      </a>
+
+      <a href="https://www.instagram.com/pablo.g.herrera/" target="_blank" rel="noopener noreferrer"
+         class="social-link instagram" aria-label="Instagram de TheLothricTV" title="Instagram">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+        </svg>
+      </a>
+
+    </nav>
+  </footer>
+</div><!-- fin #board -->
+
+</div><!-- fin #app -->
+
+<script>
+/* ── FONDO ── */
+(function () {
+  const container = document.getElementById('particles');
+  for (let i = 0; i < 28; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    const size  = Math.random() * 2.5 + 0.8;
+    const drift = (Math.random() - 0.5) * 120;
+    p.style.cssText =
+      'width:' + size + 'px;height:' + size + 'px;' +
+      'left:' + (Math.random() * 100) + '%;bottom:-4px;' +
+      'animation-duration:' + (Math.random() * 14 + 12) + 's;' +
+      'animation-delay:-' + (Math.random() * 18) + 's;' +
+      '--drift:' + drift + 'px;opacity:0;';
+    container.appendChild(p);
+  }
+
+  const canvas = document.getElementById('fog-canvas');
+  const ctx    = canvas.getContext('2d');
+  let W = canvas.width  = window.innerWidth;
+  let H = canvas.height = window.innerHeight;
+  window.addEventListener('resize', () => {
+    W = canvas.width  = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  });
+
+  const blobs = Array.from({ length: 5 }, () => ({
+    x: Math.random() * W, y: Math.random() * H,
+    r: 220 + Math.random() * 280,
+    vx: (Math.random() - 0.5) * 0.18,
+    vy: (Math.random() - 0.5) * 0.10,
+    hue: 220 + Math.random() * 60,
+    phase: Math.random() * Math.PI * 2,
+  }));
+
+  (function drawFog() {
+    ctx.clearRect(0, 0, W, H);
+    blobs.forEach(b => {
+      b.phase += 0.003;
+      b.x += b.vx + Math.sin(b.phase * 0.7) * 0.12;
+      b.y += b.vy + Math.cos(b.phase * 0.5) * 0.08;
+      if (b.x < -b.r) b.x = W + b.r;
+      if (b.x > W + b.r) b.x = -b.r;
+      if (b.y < -b.r) b.y = H + b.r;
+      if (b.y > H + b.r) b.y = -b.r;
+      const pulse = 0.85 + 0.15 * Math.sin(b.phase * 1.3);
+      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r * pulse);
+      g.addColorStop(0,   'hsla(' + b.hue + ',40%,18%,0.22)');
+      g.addColorStop(0.5, 'hsla(' + b.hue + ',30%,12%,0.10)');
+      g.addColorStop(1,   'hsla(' + b.hue + ',20%,8%,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(b.x, b.y, b.r * pulse, b.r * pulse * 0.65, b.phase * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    requestAnimationFrame(drawFog);
+  })();
+})();
+
+/* ── BINGO ── */
+const GHOSTS = [
+  "Espíritu","Poltergeist","Ente","Espectro","Demonio","Yurei","Oni",
+  "Yokai","Hantu","Goryo","Myling","Onryo","Gemelos","Raiju","Obake",
+  "Mímico","Moroi","Deogen","Thaye","Revenant","Sombra","Banshee","Jinn","Pesadilla"
+];
+const FREE = "LIBRE", SIZE = 5, TOTAL = SIZE * SIZE;
+
+// ── calledGhosts es GLOBAL para que funcione antes y después de showBoard ──
+const calledGhosts = new Set();
+
+function seededRng(seed) {
+  let s = seed;
+  return () => { s = (s * 1664525 + 1013904223) & 0xffffffff; return (s >>> 0) / 0xffffffff; };
+}
+function hashString(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = (h * 33 ^ str.charCodeAt(i)) & 0x7fffffff;
+  return h;
+}
+function shuffle(arr, rng) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+function buildGrid(seed) {
+  const rng = seededRng(hashString(seed)), ghosts = shuffle(GHOSTS, rng), cells = [];
+  const mid = Math.floor(TOTAL / 2);
+  for (let i = 0; i < TOTAL; i++) cells.push(i === mid ? FREE : ghosts[i < mid ? i : i - 1]);
+  return cells;
+}
+
+// Valida bingo solo con celdas cantadas oficialmente (o LIBRE)
+// En producción la validación final siempre la hace el backend también
+function getBingoLines(marked, cells) {
+  const lines = [];
+  for (let r = 0; r < SIZE; r++) lines.push([...Array(SIZE)].map((_, c) => r * SIZE + c));
+  for (let c = 0; c < SIZE; c++) lines.push([...Array(SIZE)].map((_, r) => r * SIZE + c));
+  lines.push([...Array(SIZE)].map((_, i) => i * SIZE + i));
+  lines.push([...Array(SIZE)].map((_, i) => i * SIZE + (SIZE - 1 - i)));
+  return lines.filter(line =>
+    line.every(idx => {
+      const ghost = cells[idx];
+      if (ghost === FREE) return true;               // LIBRE siempre válida
+      if (!marked.has(idx)) return false;            // no marcada
+      return calledGhosts.has(ghost);                // debe estar cantada
+    })
+  );
+}
+
+const BACKEND = 'https://phasmobingo.ddnsfree.com';
+
+// Token del tablón — viene en el path: phasmobingo.ddnsfree.com/TOKEN
+const pathToken = window.location.pathname.replace(/^\//, '').split('?')[0];
+
+// Parámetros de la URL
+const urlParams  = new URLSearchParams(window.location.search);
+const seedParam  = urlParams.get('seed');   // modo debug
+const userParam  = urlParams.get('user') ? decodeURIComponent(urlParams.get('user')) : '';
+const authStatus = urlParams.get('auth');   // 'ok' o 'error' tras OAuth
+const authUser   = urlParams.get('u');      // username devuelto por el backend tras OAuth
+
+// ══════════════════════════════════════════════════════════════════
+//  SISTEMA DE PANTALLAS
+// ══════════════════════════════════════════════════════════════════
+
+function showScreen(id) {
+  ['screen-auth','screen-expired','screen-invalid','screen-ended','welcome','board']
+    .forEach(s => {
+      const el = document.getElementById(s);
+      if (el) el.style.display = 'none';
+    });
+  const target = document.getElementById(id);
+  if (target) target.style.display = 'flex';
+  document.getElementById('app').style.visibility = 'visible';
+}
+
+function showAuthScreen()    { showScreen('screen-auth');    }
+function showExpiredScreen() { showScreen('screen-expired'); }
+function showInvalidScreen() { showScreen('screen-invalid'); }
+function showEndedScreen()   { showScreen('screen-ended');   }
+
+window.showAuthScreen    = showAuthScreen;
+window.showExpiredScreen = showExpiredScreen;
+window.showInvalidScreen = showInvalidScreen;
+window.showEndedScreen   = showEndedScreen;
+
+// ══════════════════════════════════════════════════════════════════
+//  WEBSOCKET
+// ══════════════════════════════════════════════════════════════════
+
+let socket = null;
+
+function connectSocket(token, username, sig) {
+  socket = io(BACKEND, { transports: ['websocket', 'polling'] });
+
+  socket.on('connect', () => {
+    console.log('[WS] Conectado al servidor');
+  });
+
+  socket.on('ghost_called', data => {
+    addCalledGhost(data.name);
+  });
+
+  socket.on('leaderboard_update', data => {
+    updateLeaderboard(data);
+  });
+
+  socket.on('leaderboard_reset', () => {
+    resetLeaderboard();
+  });
+
+  socket.on('bingo_won', data => {
+    console.log('[WS] Bingo ganado por:', data.username);
+  });
+
+  socket.on('game_over', () => {
+    setGameOver();
+  });
+
+  socket.on('stream_ended', () => {
+    showExpiredScreen();
+  });
+
+  socket.on('disconnect', () => {
+    console.log('[WS] Desconectado del servidor');
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  RENDER GLOBAL
+// ══════════════════════════════════════════════════════════════════
+
+let _render = () => {};
+
+// ══════════════════════════════════════════════════════════════════
+//  SIDEBAR DE CANTADOS
+// ══════════════════════════════════════════════════════════════════
+
+function addCalledGhost(name) {
+  if (calledGhosts.has(name)) return;
+  calledGhosts.add(name);
+
+  const list = document.getElementById('called-list');
+  const prev = list.querySelector('.latest');
+  if (prev) prev.classList.remove('latest');
+
+  const tag = document.createElement('div');
+  tag.className = 'ghost-tag latest';
+  tag.dataset.ghost = name;
+  const n = calledGhosts.size;
+  tag.innerHTML =
+    '<span class="sb-dot"></span>' +
+    '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + name + '</span>' +
+    '<span class="sb-num">#' + n + '</span>';
+  list.appendChild(tag);
+  setTimeout(() => list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' }), 50);
+
+  document.getElementById('sb-count').textContent =
+    n + ' fantasma' + (n !== 1 ? 's' : '');
+
+  const barInner = document.getElementById('called-bar-inner');
+  const btag = document.createElement('span');
+  btag.className = 'ghost-tag';
+  btag.dataset.ghost = name;
+  btag.innerHTML = '<span class="sb-dot"></span>' + name;
+  const prevBar = barInner.querySelector('.latest');
+  if (prevBar) prevBar.classList.remove('latest');
+  btag.classList.add('latest');
+  barInner.appendChild(btag);
+
+  _render();
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  TABLA DE POSICIONES
+// ══════════════════════════════════════════════════════════════════
+
+const MEDALS = ['1o','2o','3o'];
+
+function updateLeaderboard(entries) {
+  const list  = document.getElementById('leaderboard-list');
+  const count = document.getElementById('lb-count');
+
+  const existing = {};
+  list.querySelectorAll('.lb-row').forEach(el => { existing[el.dataset.user] = el; });
+
+  list.innerHTML = '';
+  const top = entries.slice(0, 10);
+  top.forEach((entry, i) => {
+    const rank = i + 1;
+    const row  = document.createElement('div');
+    row.className = 'lb-row' +
+      (rank === 1 ? ' rank-1' : rank === 2 ? ' rank-2' : rank === 3 ? ' rank-3' : '');
+    row.dataset.user   = entry.username;
+    row.dataset.points = entry.points;
+    row.dataset.rank   = rank;
+
+    const wasHere = existing[entry.username];
+    const changed = !wasHere ||
+      parseInt(wasHere.dataset.points) !== entry.points ||
+      parseInt(wasHere.dataset.rank)   !== rank;
+    if (changed) row.classList.add('updated');
+
+    row.innerHTML =
+      '<span class="lb-rank">' + (MEDALS[i] || rank + 'o') + '</span>' +
+      '<span class="lb-name">' + entry.username + '</span>' +
+      '<span class="lb-pts">'  + entry.points + ' pts</span>';
+    list.appendChild(row);
+  });
+
+  count.textContent = top.length > 0 ? 'top ' + top.length : 'sin datos';
+}
+
+function resetLeaderboard() {
+  document.getElementById('leaderboard-list').innerHTML = '';
+  document.getElementById('lb-count').textContent = 'sin datos';
+}
+
+function setGameOver() {
+  document.querySelectorAll('.cell').forEach(c => {
+    c.style.pointerEvents = 'none';
+    c.classList.add('readonly');
+  });
+  const banner = document.getElementById('readonly-banner');
+  banner.style.display = 'block';
+  banner.textContent = 'El bingo de este stream ha finalizado';
+}
+
+window.addCalledGhost    = addCalledGhost;
+window.updateLeaderboard = updateLeaderboard;
+window.resetLeaderboard  = resetLeaderboard;
+window.setGameOver       = setGameOver;
+
+// ══════════════════════════════════════════════════════════════════
+//  AUTENTICACION TWITCH
+// ══════════════════════════════════════════════════════════════════
+
+document.getElementById('twitch-login-btn').onclick = function() {
+  // Guardar el token actual para volver después del login
+  if (pathToken) {
+    sessionStorage.setItem('pb_return_token', pathToken);
+  }
+  window.location.href = BACKEND + '/auth/twitch';
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  LÓGICA DE CARGA AL INICIAR
+// ══════════════════════════════════════════════════════════════════
+
+function initPage() {
+
+  // ── MODO DEBUG: si hay ?seed= en la URL ──
+  if (seedParam) {
+    showBoard(seedParam, userParam, null, false);
+    return;
+  }
+
+  // ── Regreso de OAuth de Twitch ──
+  if (authStatus === 'ok' && authUser) {
+    // Guardar el username autenticado
+    sessionStorage.setItem('pb_twitch_user', authUser);
+
+    // Recuperar el token al que volver
+    const returnToken = sessionStorage.getItem('pb_return_token') || pathToken;
+    sessionStorage.removeItem('pb_return_token');
+
+    if (returnToken) {
+      // Limpiar la URL y cargar el tablón
+      history.replaceState(null, '', '/' + returnToken);
+      loadSession(returnToken, authUser);
+    } else {
+      showInvalidScreen();
+    }
+    return;
+  }
+
+  if (authStatus === 'error') {
+    showInvalidScreen();
+    return;
+  }
+
+  // ── MODO PRODUCCIÓN: cargar sesión por token en el path ──
+  if (!pathToken) {
+    showInvalidScreen();
+    return;
+  }
+
+  const savedUser = sessionStorage.getItem('pb_twitch_user');
+
+  if (!savedUser) {
+    // No hay sesión de Twitch guardada — pedir login
+    showAuthScreen();
+    return;
+  }
+
+  loadSession(pathToken, savedUser);
+}
+
+async function loadSession(token, username) {
+  // Generar firma para autenticar la petición
+  const sig = await generateSig(token, username);
+
+  try {
+    const res  = await fetch(BACKEND + '/api/session/' + token + '?u=' + encodeURIComponent(username) + '&sig=' + sig);
+    const data = await res.json();
+
+    if (data.status === 'invalid')   { showInvalidScreen(); return; }
+    if (data.status === 'expired')   { showExpiredScreen(); return; }
+
+    // Cargar fantasmas ya cantados
+    if (data.called_ghosts && data.called_ghosts.length > 0) {
+      data.called_ghosts.forEach(g => addCalledGhost(g));
+    }
+
+    // Cargar tabla de posiciones
+    if (data.leaderboard && data.leaderboard.length > 0) {
+      updateLeaderboard(data.leaderboard);
+    }
+
+    const isOwner   = username.toLowerCase() === data.username.toLowerCase();
+    const isRO      = !isOwner || data.gameEnded || data.status === 'readonly';
+
+    showBoard(data.seed, data.username, data.marked, isRO, token, username, sig);
+    connectSocket(token, username, sig);
+
+  } catch (err) {
+    console.error('[Load] Error cargando sesión:', err);
+    showInvalidScreen();
+  }
+}
+
+// Genera una firma HMAC-SHA256 usando la Web Crypto API del navegador
+// Nota: el HMAC_SECRET no se expone al frontend — la firma se pide al backend
+async function generateSig(token, username) {
+  try {
+    const res  = await fetch(BACKEND + '/api/sign?token=' + token + '&u=' + encodeURIComponent(username));
+    const data = await res.json();
+    return data.sig;
+  } catch {
+    return '';
+  }
+}
+
+initPage();
+
+// ── Botón de debug (pantalla de bienvenida) ──
+const usernameInput = document.getElementById('username-input');
+if (document.getElementById('start-btn')) {
+  document.getElementById('start-btn').onclick = startBoard;
+  if (usernameInput) {
+    usernameInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); startBoard(); }
+    });
+  }
+}
+
+function startBoard() {
+  const name = usernameInput ? usernameInput.value.trim() : '';
+  const ns   = Math.random().toString(36).slice(2, 10);
+  const url  = new URL(window.location);
+  url.searchParams.set('seed', ns);
+  if (name) url.searchParams.set('user', encodeURIComponent(name));
+  else      url.searchParams.delete('user');
+  history.replaceState(null, '', url);
+  showBoard(ns, name, null, false);
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  MOSTRAR TABLERO
+// ══════════════════════════════════════════════════════════════════
+
+function showBoard(seed, username, markedArr, isReadOnly, token, authUsername, sig) {
+  ['screen-auth','screen-expired','screen-invalid','screen-ended','welcome'].forEach(s => {
+    const el = document.getElementById(s);
+    if (el) el.style.display = 'none';
+  });
+  document.getElementById('board').style.display = 'flex';
+  document.getElementById('app').style.visibility = 'visible';
+
+  const cells  = buildGrid(seed);
+  let marked   = new Set();
+  const isRO   = !!isReadOnly;
+  const toastEl = document.getElementById('toast');
+
+  // Cargar marcados previos desde el backend
+  if (Array.isArray(markedArr)) markedArr.forEach(n => marked.add(+n));
+
+  const seedEl = document.getElementById('seed-label');
+  if (username) {
+    seedEl.innerHTML = 'Tablero de <span class="username">' + username + '</span> — #' + seed;
+  } else {
+    seedEl.textContent = 'Tablero #' + seed;
+  }
+
+  const bannerEl = document.getElementById('readonly-banner');
+  if (isRO) {
+    bannerEl.style.display = 'block';
+    bannerEl.textContent   = username
+      ? 'Estas viendo el bingo de ' + username + ' — solo lectura'
+      : 'Estas viendo el bingo de otra persona — solo lectura';
+    document.getElementById('share-btn').style.display = 'none';
+  }
+
+  const gridEl    = document.getElementById('grid');
+  const counterEl = document.getElementById('counter');
+  const bingoEl   = document.getElementById('bingo-msg');
+
+  // Guardar progreso en el backend
+  async function saveProgress() {
+    if (!token || !authUsername || !sig || isRO) return;
+    try {
+      await fetch(
+        BACKEND + '/api/session/' + token + '/progress?u=' + encodeURIComponent(authUsername) + '&sig=' + sig,
+        {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ marked: [...marked] })
+        }
+      );
+    } catch (err) {
+      console.error('[Save] Error guardando progreso:', err);
+    }
+  }
+
+  // Validar bingo en el backend
+  async function validateBingo(line) {
+    if (!token || !authUsername || !sig || isRO) return;
+    try {
+      const res  = await fetch(
+        BACKEND + '/api/session/' + token + '/bingo?u=' + encodeURIComponent(authUsername) + '&sig=' + sig,
+        {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ line, cells })
+        }
+      );
+      const data = await res.json();
+      if (data.valid) {
+        console.log('[Bingo] Bingo validado! Puntos:', data.points);
+      }
+    } catch (err) {
+      console.error('[Bingo] Error validando bingo:', err);
+    }
+  }
+
+  function render() {
+    const bingoLines = getBingoLines(marked, cells);
+    const bingoSet   = new Set(bingoLines.flat());
+    gridEl.innerHTML = '';
+    cells.forEach((ghost, i) => {
+      const div = document.createElement('div');
+      div.className   = 'cell';
+      div.textContent = ghost;
+      if (ghost === FREE) {
+        div.classList.add('free');
+      } else if (bingoSet.has(i)) {
+        div.classList.add('bingo-line');
+        if (isRO) div.classList.add('readonly');
+      } else if (marked.has(i)) {
+        div.classList.add(calledGhosts.has(ghost) ? 'marked' : 'wrong');
+        if (isRO) div.classList.add('readonly');
+      } else {
+        if (isRO) div.classList.add('readonly');
+      }
+      if (!isRO && ghost !== FREE) {
+        div.onclick = () => {
+          if (marked.has(i)) marked.delete(i); else marked.add(i);
+          saveProgress();
+          render();
+          // Verificar si hay bingo nuevo y validarlo
+          const newLines = getBingoLines(marked, cells);
+          if (newLines.length > 0) {
+            newLines.forEach(line => validateBingo(line));
+          }
+        };
+      }
+      gridEl.appendChild(div);
+    });
+    counterEl.textContent = marked.size + ' marcados';
+    if (bingoLines.length > 0) {
+      bingoEl.style.display = 'block';
+      bingoEl.textContent   = bingoLines.length === 1 ? 'Bingo' : bingoLines.length + ' Bingos';
+    } else {
+      bingoEl.style.display = 'none';
+    }
+  }
+
+  render();
+  _render = render;
+
+  document.getElementById('share-btn').onclick = () => {
+    const url = BACKEND + '/' + (token || '');
+    navigator.clipboard.writeText(url).then(() => {
+      toastEl.classList.add('show');
+      setTimeout(() => toastEl.classList.remove('show'), 2500);
+    }).catch(() => { prompt('Copia este link:', url); });
+  };
+}
+</script>
+</body>
+</html>
+
+// ══════════════════════════════════════════════════════════════════
+//  SISTEMA DE PANTALLAS
+//  Funciones públicas para mostrar cada estado desde el backend
+// ══════════════════════════════════════════════════════════════════
+
+function showScreen(id) {
+  ['screen-auth','screen-expired','screen-invalid','screen-ended','welcome','board']
+    .forEach(s => {
+      const el = document.getElementById(s);
+      if (el) el.style.display = 'none';
+    });
+  const target = document.getElementById(id);
+  if (target) target.style.display = 'flex';
+  // Revelar el contenedor ahora que ya decidimos qué mostrar
+  document.getElementById('app').style.visibility = 'visible';
+}
+
+// Muestra la pantalla de autenticación con Twitch
+function showAuthScreen() { showScreen('screen-auth'); }
+
+// Muestra pantalla de link expirado (stream terminó)
+function showExpiredScreen() { showScreen('screen-expired'); }
+
+// Muestra pantalla de link inválido (token no existe en BD)
+function showInvalidScreen() { showScreen('screen-invalid'); }
+
+// Muestra pantalla de bingo finalizado (2 bingos completados, stream sigue vivo)
+function showEndedScreen() { showScreen('screen-ended'); }
+
+// Exponer globalmente para poder llamarlas desde el WebSocket en producción
+window.showAuthScreen    = showAuthScreen;
+window.showExpiredScreen = showExpiredScreen;
+window.showInvalidScreen = showInvalidScreen;
+window.showEndedScreen   = showEndedScreen;
+
+// ══════════════════════════════════════════════════════════════════
+//  AUTENTICACIÓN TWITCH — PASOS VACÍOS (rellenar en producción)
+// ══════════════════════════════════════════════════════════════════
+
+document.getElementById('twitch-login-btn').onclick = function() {
+  // TODO: iniciar flujo OAuth con Twitch
+  // Paso 1: redirigir a https://id.twitch.tv/oauth2/authorize con los params del app
+  // Paso 2: Twitch redirige de vuelta con un code en la URL
+  // Paso 3: el backend intercambia el code por un access_token
+  // Paso 4: el backend valida el token y devuelve el username
+  // Paso 5: comparar username con el dueño del token → showBoard() o solo lectura
+  console.log('[AUTH] Botón de Twitch clickeado — flujo OAuth pendiente de implementar');
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  LÓGICA DE CARGA AL INICIAR
+//  En producción: consulta al backend con el token de la URL.
+//  En debug: usa los params ?seed= y ?user= como antes.
+// ══════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════
+//  FUNCIONES GLOBALES — disponibles siempre, incluso antes de showBoard
+//  El WebSocket del backend las llama directamente
+// ══════════════════════════════════════════════════════════════════
+
+// Render global — se sobreescribe cuando showBoard() se ejecuta
+let _render = () => {};
+
+function addCalledGhost(name) {
+  if (calledGhosts.has(name)) return;
+  calledGhosts.add(name);
+
+  // Sidebar lateral
+  const list = document.getElementById('called-list');
+  const prev = list.querySelector('.latest');
+  if (prev) prev.classList.remove('latest');
+
+  const tag = document.createElement('div');
+  tag.className = 'ghost-tag latest';
+  tag.dataset.ghost = name;
+  const n = calledGhosts.size;
+  tag.innerHTML =
+    '<span class="sb-dot"></span>' +
+    '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + name + '</span>' +
+    '<span class="sb-num">#' + n + '</span>';
+  list.appendChild(tag);
+  setTimeout(() => list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' }), 50);
+
+  document.getElementById('sb-count').textContent =
+    n + ' fantasma' + (n !== 1 ? 's' : '');
+
+  // Barra compacta móvil
+  const barInner = document.getElementById('called-bar-inner');
+  const btag = document.createElement('span');
+  btag.className = 'ghost-tag';
+  btag.dataset.ghost = name;
+  btag.innerHTML = '<span class="sb-dot"></span>' + name;
+  const prevBar = barInner.querySelector('.latest');
+  if (prevBar) prevBar.classList.remove('latest');
+  btag.classList.add('latest');
+  barInner.appendChild(btag);
+
+  // Re-renderizar el tablero para actualizar colores
+  _render();
+}
+
+const MEDALS = ['🥇','🥈','🥉'];
+
+function updateLeaderboard(entries) {
+  const list  = document.getElementById('leaderboard-list');
+  const count = document.getElementById('lb-count');
+
+  const existing = {};
+  list.querySelectorAll('.lb-row').forEach(el => { existing[el.dataset.user] = el; });
+
+  list.innerHTML = '';
+  const top = entries.slice(0, 10);
+  top.forEach((entry, i) => {
+    const rank = i + 1;
+    const row  = document.createElement('div');
+    row.className = 'lb-row' +
+      (rank === 1 ? ' rank-1' : rank === 2 ? ' rank-2' : rank === 3 ? ' rank-3' : '');
+    row.dataset.user   = entry.username;
+    row.dataset.points = entry.points;
+    row.dataset.rank   = rank;
+
+    const wasHere = existing[entry.username];
+    const changed = !wasHere ||
+      parseInt(wasHere.dataset.points) !== entry.points ||
+      parseInt(wasHere.dataset.rank)   !== rank;
+    if (changed) row.classList.add('updated');
+
+    row.innerHTML =
+      '<span class="lb-rank">' + (MEDALS[i] || rank + '°') + '</span>' +
+      '<span class="lb-name">' + entry.username + '</span>' +
+      '<span class="lb-pts">'  + entry.points + ' pts</span>';
+    list.appendChild(row);
+  });
+
+  count.textContent = top.length > 0 ? 'top ' + top.length : 'sin datos';
+}
+
+function resetLeaderboard() {
+  document.getElementById('leaderboard-list').innerHTML = '';
+  document.getElementById('lb-count').textContent = 'sin datos';
+}
+
+// Bloquear todos los tablones en modo solo lectura (evento game_over via WebSocket)
+function setGameOver() {
+  document.querySelectorAll('.cell').forEach(c => {
+    c.style.pointerEvents = 'none';
+    c.classList.add('readonly');
+  });
+  const banner = document.getElementById('readonly-banner');
+  banner.style.display = 'block';
+  banner.textContent   = '🏆 El bingo de este stream ha finalizado';
+}
+
+// Exponer todo globalmente
+window.addCalledGhost    = addCalledGhost;
+window.updateLeaderboard = updateLeaderboard;
+window.resetLeaderboard  = resetLeaderboard;
+window.setGameOver       = setGameOver;
+window.showExpiredScreen = showExpiredScreen;
+
+function initPage() {
+  // ── MODO DEBUG: si hay ?seed= en la URL, saltar directo al tablero ──
+  if (seedParam) {
+    showBoard(seedParam, userParam, markedParam);
+    return;
+  }
+
+  // ── MODO PRODUCCIÓN (descomentar cuando el backend esté listo) ──
+  // if (!tokenParam) { showInvalidScreen(); return; }
+  //
+  // fetch('/api/session/' + tokenParam)
+  //   .then(r => r.json())
+  //   .then(data => {
+  //     if (data.status === 'invalid')   { showInvalidScreen(); return; }
+  //     if (data.status === 'expired')   { showExpiredScreen(); return; }
+  //     if (data.status === 'ended')     { showEndedScreen();   return; }
+  //
+  //     // Verificar si el usuario ya tiene sesión de Twitch guardada
+  //     const savedUser = localStorage.getItem('pb_twitch_user');
+  //     if (!savedUser) { showAuthScreen(); return; }
+  //
+  //     // Comparar usuario autenticado con dueño del token
+  //     const isOwner = savedUser === data.username;
+  //     showBoard(data.seed, data.username, null, !isOwner);
+  //   })
+  //   .catch(() => showInvalidScreen());
+
+  // ── Fallback debug: si no hay token ni seed, mostrar pantalla de auth ──
+  showAuthScreen();
+}
+
+initPage();
+
+// ── Botón de debug en welcome (se mantiene para pruebas) ──
+const usernameInput = document.getElementById('username-input');
+if (document.getElementById('start-btn')) {
+  document.getElementById('start-btn').onclick = startBoard;
+  if (usernameInput) {
+    usernameInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); startBoard(); }
+    });
+  }
+}
+
+function startBoard() {
+  const name = usernameInput ? usernameInput.value.trim() : '';
+  const ns   = Math.random().toString(36).slice(2, 10);
+  const url  = new URL(window.location);
+  url.searchParams.set('seed', ns);
+  url.searchParams.delete('m');
+  if (name) url.searchParams.set('user', encodeURIComponent(name));
+  else      url.searchParams.delete('user');
+  history.replaceState(null, '', url);
+  showBoard(ns, name, null);
+}
+
+function showBoard(seed, username, markedStr) {
+  ['screen-auth','screen-expired','screen-invalid','screen-ended','welcome'].forEach(s => {
+    const el = document.getElementById(s);
+    if (el) el.style.display = 'none';
+  });
+  document.getElementById('board').style.display = 'flex';
+  document.getElementById('app').style.visibility = 'visible';
+
+  const cells   = buildGrid(seed);
+  let marked    = new Set();
+  const isRO    = !!markedStr;
+  const toastEl = document.getElementById('toast'); // declarado aquí para el scope correcto
+  if (markedStr) markedStr.split(',').filter(Boolean).forEach(n => marked.add(+n));
+
+  const seedEl = document.getElementById('seed-label');
+  if (username) {
+    seedEl.innerHTML = 'Tablero de <span class="username">' + username + '</span> — #' + seed;
+  } else {
+    seedEl.textContent = 'Tablero #' + seed;
+  }
+
+  const bannerEl = document.getElementById('readonly-banner');
+  if (isRO) {
+    bannerEl.style.display = 'block';
+    bannerEl.textContent   = username
+      ? 'Estás viendo el bingo de ' + username + ' — solo lectura'
+      : 'Estás viendo el bingo de otra persona — solo lectura';
+    document.getElementById('share-btn').style.display = 'none';
+  }
+
+  const gridEl    = document.getElementById('grid');
+  const counterEl = document.getElementById('counter');
+  const bingoEl   = document.getElementById('bingo-msg');
+
+  function saveProgress() {
+    // TODO (producción): enviar marked al backend vía WebSocket para guardar en Supabase
+    // Por ahora en debug se guarda en la URL como parámetro ?m=
+    const url = new URL(window.location);
+    url.searchParams.set('seed', seed);
+    url.searchParams.delete('m');
+    if (username) url.searchParams.set('user', encodeURIComponent(username));
+    else          url.searchParams.delete('user');
+    history.replaceState(null, '', url);
+  }
+
+  function render() {
+    const bingoLines = getBingoLines(marked, cells);
+    const bingoSet   = new Set(bingoLines.flat());
+    gridEl.innerHTML = '';
+    cells.forEach((ghost, i) => {
+      const div = document.createElement('div');
+      div.className   = 'cell';
+      div.textContent = ghost;
+      if (ghost === FREE) {
+        div.classList.add('free');
+      } else if (bingoSet.has(i)) {
+        div.classList.add('bingo-line');
+        if (isRO) div.classList.add('readonly');
+      } else if (marked.has(i)) {
+        // Verde si fue cantado, rojo si no
+        div.classList.add(calledGhosts.has(ghost) ? 'marked' : 'wrong');
+        if (isRO) div.classList.add('readonly');
+      } else {
+        if (isRO) div.classList.add('readonly');
+      }
+      if (!isRO && ghost !== FREE) {
+        div.onclick = () => {
+          if (marked.has(i)) marked.delete(i); else marked.add(i);
+          saveProgress(); render();
+        };
+      }
+      gridEl.appendChild(div);
+    });
+    counterEl.textContent = marked.size + ' marcados';
+    if (bingoLines.length > 0) {
+      bingoEl.style.display = 'block';
+      bingoEl.textContent   = bingoLines.length === 1 ? 'Bingo' : bingoLines.length + ' Bingos';
+    } else {
+      bingoEl.style.display = 'none';
+    }
+  }
+  render();
+
+  // Conectar render global para que addCalledGhost actualice el tablero
+  _render = render;
+
+  document.getElementById('share-btn').onclick = () => {
+    const url = new URL(window.location);
+    url.searchParams.set('seed', seed);
+    if (marked.size > 0) url.searchParams.set('m', [...marked].join(','));
+    else                  url.searchParams.delete('m');
+    if (username) url.searchParams.set('user', encodeURIComponent(username));
+    else          url.searchParams.delete('user');
+    navigator.clipboard.writeText(url.toString()).then(() => {
+      toastEl.classList.add('show');
+      setTimeout(() => toastEl.classList.remove('show'), 2500);
+    }).catch(() => { prompt('Copia este link:', url.toString()); });
+  };
+}
+</script>
+</body>
+</html>
