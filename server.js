@@ -33,6 +33,36 @@ function verifyToken(token, username, sig) {
 
 let appAccessToken = null;
 
+// ── Diccionario de fantasmas: comando → nombre oficial en el tablero ──
+const GHOST_ALIASES = {
+  'espirito':    'Espíritu',
+  'espiritu':    'Espíritu',
+  'poltergeist': 'Poltergeist',
+  'ente':        'Ente',
+  'espectro':    'Espectro',
+  'demonio':     'Demonio',
+  'yurei':       'Yurei',
+  'oni':         'Oni',
+  'yokai':       'Yokai',
+  'hantu':       'Hantu',
+  'goryo':       'Goryo',
+  'myling':      'Myling',
+  'onryo':       'Onryo',
+  'gemelos':     'Gemelos',
+  'raiju':       'Raiju',
+  'obake':       'Obake',
+  'mimico':      'Mímico',
+  'mímico':      'Mímico',
+  'moroi':       'Moroi',
+  'deogen':      'Deogen',
+  'thaye':       'Thaye',
+  'revenant':    'Revenant',
+  'sombra':      'Sombra',
+  'banshee':     'Banshee',
+  'jinn':        'Jinn',
+  'pesadilla':   'Pesadilla'
+};
+
 async function getAppToken() {
   const res = await axios.post('https://id.twitch.tv/oauth2/token', null, {
     params: { client_id: process.env.TWITCH_CLIENT_ID, client_secret: process.env.TWITCH_CLIENT_SECRET, grant_type: 'client_credentials' }
@@ -216,8 +246,15 @@ botClient.on('message', async (channel, tags, message, self) => {
     if (!isMod) return;
     if (!currentStream) { say('No hay ningun bingo activo.'); return; }
     if (currentStream.bingos_won >= 2) { say('El bingo ya finalizo, no se pueden cantar mas fantasmas.'); return; }
-    const ghostRaw = msg.slice(3).trim();
-    const ghost    = ghostRaw.charAt(0).toUpperCase() + ghostRaw.slice(1);
+
+    const ghostKey = msg.slice(3).trim();
+    const ghost    = GHOST_ALIASES[ghostKey];
+
+    if (!ghost) {
+      say('Fantasma no reconocido: ' + ghostKey + '. Usa uno de los 24 fantasmas del tablero.');
+      return;
+    }
+
     if (currentStream.called_ghosts.map(g => g.toLowerCase()).includes(ghost.toLowerCase())) { say(ghost + ' ya fue cantado anteriormente.'); return; }
     currentStream.called_ghosts.push(ghost);
     const { error } = await supabase.from('streams').update({ called_ghosts: currentStream.called_ghosts }).eq('stream_id', currentStream.stream_id);
