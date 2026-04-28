@@ -1160,6 +1160,13 @@ function getBingoLines(marked, cells) {
     })
   );
 }
+  
+// Recuperar redirect de 404
+const _redirect = sessionStorage.getItem('pb_redirect');
+if (_redirect) {
+  sessionStorage.removeItem('pb_redirect');
+  history.replaceState(null, '', '/phasmobingo' + _redirect);
+}
 
 const BACKEND = 'https://phasmobingo.ddnsfree.com';
 
