@@ -3,10 +3,12 @@
 <head>
   <meta charset="utf-8">
   <script>
-    // Redirigir al index.html manteniendo la ruta completa
-    const path = window.location.pathname.replace('/phasmobingo', '');
+    const path   = window.location.pathname.replace('/phasmobingo', '');
     const search = window.location.search;
     sessionStorage.setItem('pb_redirect', path + search);
+    // También guardar el token directamente para el OAuth
+    const token  = path.replace('/', '').split('?')[0];
+    if (token) sessionStorage.setItem('pb_return_token', token);
     window.location.replace('/phasmobingo/');
   </script>
 </head>
