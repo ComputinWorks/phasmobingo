@@ -1171,7 +1171,7 @@ if (_redirect) {
 const BACKEND = 'https://phasmobingo.ddnsfree.com';
 
 // Token del tablón — viene en el path: phasmobingo.ddnsfree.com/TOKEN
-const pathToken = window.location.pathname.replace(/^\//, '').split('?')[0];
+const pathToken = window.location.pathname.replace(/^\/phasmobingo\//, '').split('?')[0];
 
 // Parámetros de la URL
 const urlParams  = new URLSearchParams(window.location.search);
