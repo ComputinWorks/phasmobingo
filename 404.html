@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>
+    // Redirigir al index.html manteniendo la ruta completa
+    const path = window.location.pathname.replace('/phasmobingo', '');
+    const search = window.location.search;
+    sessionStorage.setItem('pb_redirect', path + search);
+    window.location.replace('/phasmobingo/');
+  </script>
+</head>
+<body></body>
+</html>
