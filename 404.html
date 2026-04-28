@@ -1,42 +1,15 @@
 <!DOCTYPE html>
-<html lang="es">
+<html>
 <head>
   <meta charset="utf-8">
-  <meta name="robots" content="noindex,nofollow">
-  <meta http-equiv="refresh" content="0; url=/phasmobingo/">
   <script>
-    (function () {
-      const BASE_PATH = '/phasmobingo';
-
-      const pathname = window.location.pathname || '';
-      const search = window.location.search || '';
-
-      // Quita el prefijo del repo si existe
-      let relativePath = pathname.startsWith(BASE_PATH)
-        ? pathname.slice(BASE_PATH.length)
-        : pathname;
-
-      // Normaliza para que quede como "/token" o "/"
-      if (!relativePath.startsWith('/')) {
-        relativePath = '/' + relativePath;
-      }
-
-      // Guarda la ruta completa que estaba intentando abrir
-      sessionStorage.setItem('pb_redirect', relativePath + search);
-
-      // Guarda el token principal para el flujo OAuth / retorno
-      const token = relativePath
-        .replace(/^\/+/, '')
-        .split('/')[0]
-        .split('?')[0];
-
-      if (token) {
-        sessionStorage.setItem('pb_return_token', token);
-      }
-
-      // Redirige al índice principal del proyecto
-      window.location.replace(BASE_PATH + '/');
-    })();
+    const path   = window.location.pathname.replace('/phasmobingo', '');
+    const search = window.location.search;
+    sessionStorage.setItem('pb_redirect', path + search);
+    // También guardar el token directamente para el OAuth
+    const token  = path.replace('/', '').split('?')[0];
+    if (token) sessionStorage.setItem('pb_return_token', token);
+    window.location.replace('/phasmobingo/');
   </script>
 </head>
 <body></body>
