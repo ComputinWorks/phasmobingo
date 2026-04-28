@@ -165,9 +165,20 @@ async function checkEligibility(username) {
 }
 
 async function isModOrBroadcaster(username) {
-  const lower = username.toLowerCase();
-  if (lower === process.env.TWITCH_CHANNEL.toLowerCase()) return true;
-  if (!broadcasterToken) { console.warn('[Mod] No hay token del broadcaster'); return false; }
+  const lower   = username.toLowerCase();
+  const channel = process.env.TWITCH_CHANNEL.toLowerCase();
+
+  // El streamer siempre tiene permiso
+  if (lower === channel) return true;
+
+  // Lista de mods autorizados manualmente
+  const MODS_AUTORIZADOS = [
+    'lecarletti'
+    // agrega mas mods aqui si es necesario
+  ];
+  if (MODS_AUTORIZADOS.includes(lower)) return true;
+
+  if (!broadcasterToken) { console.warn('[Mod] No hay token del broadcaster.'); return false; }
   try {
     const [userId, channelId] = await Promise.all([getUserId(lower), getChannelId()]);
     if (!userId || !channelId) return false;
