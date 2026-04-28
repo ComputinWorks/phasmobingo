@@ -328,16 +328,20 @@ app.get('/api/sign', (req, res) => {
 });
 
 app.get('/auth/twitch', (req, res) => {
-  const role   = req.query.role || 'viewer';
-  const scopes = role === 'broadcaster' ? 'moderator:read:followers moderation:read' : 'user:read:email';
-  const state  = crypto.randomBytes(16).toString('hex');
+  const role     = req.query.role || 'viewer';
+  const returnTo = req.query.returnTo || '';
+  const scopes   = role === 'broadcaster'
+    ? 'moderator:read:followers moderation:read channel:read:subscriptions channel:bot'
+    : 'user:read:email';
+  const state  = crypto.randomBytes(16).toString('hex') + '|' + returnTo;
   const params = new URLSearchParams({ client_id: process.env.TWITCH_CLIENT_ID, redirect_uri: 'https://' + process.env.FRONTEND_URL + '/auth/callback', response_type: 'code', scope: scopes, state, force_verify: 'true' });
   res.redirect('https://id.twitch.tv/oauth2/authorize?' + params);
 });
 
 app.get('/auth/callback', async (req, res) => {
-  const { code, error } = req.query;
+  const { code, state, error } = req.query;
   if (error || !code) return res.redirect('https://computinworks.github.io/phasmobingo/?auth=error');
+  const returnTo = state ? (state.split('|')[1] || '') : '';
   try {
     const tokenRes = await axios.post('https://id.twitch.tv/oauth2/token', null, {
       params: { client_id: process.env.TWITCH_CLIENT_ID, client_secret: process.env.TWITCH_CLIENT_SECRET, code, grant_type: 'authorization_code', redirect_uri: 'https://' + process.env.FRONTEND_URL + '/auth/callback' }
@@ -350,7 +354,6 @@ app.get('/auth/callback', async (req, res) => {
       await saveBroadcasterToken(username, accessToken, refreshToken);
       return res.redirect('https://computinworks.github.io/phasmobingo/?auth=broadcaster_ok');
     }
-    const returnTo = req.query.returnTo || '';
     return res.redirect('https://computinworks.github.io/phasmobingo/' + returnTo + '?auth=ok&u=' + username);
   } catch (err) {
     console.error('[Auth] Error en callback:', err.message);

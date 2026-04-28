@@ -1357,11 +1357,11 @@ window.setGameOver       = setGameOver;
 // ══════════════════════════════════════════════════════════════════
 
 document.getElementById('twitch-login-btn').onclick = function() {
-  // Guardar el token actual para volver después del login
   if (pathToken) {
     sessionStorage.setItem('pb_return_token', pathToken);
   }
-  window.location.href = BACKEND + '/auth/twitch';
+  const returnTo = pathToken ? '?returnTo=' + encodeURIComponent(pathToken) : '';
+  window.location.href = BACKEND + '/auth/twitch' + returnTo;
 };
 
 // ══════════════════════════════════════════════════════════════════
