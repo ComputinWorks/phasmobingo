@@ -1171,7 +1171,7 @@ if (_redirect) {
 const BACKEND = 'https://phasmobingo.ddnsfree.com';
 
 // Token del tablón — viene en el path: phasmobingo.ddnsfree.com/TOKEN
-const pathToken = window.location.pathname.replace(/^\//, '').split('?')[0];
+const pathToken = window.location.pathname.replace(/^\/phasmobingo\//, '').split('?')[0];
 
 // Parámetros de la URL
 const urlParams  = new URLSearchParams(window.location.search);
@@ -1252,7 +1252,6 @@ function connectSocket(token, username, sig) {
 // ══════════════════════════════════════════════════════════════════
 
 let _render = () => {};
-let _checkBingo = () => {};
 
 // ══════════════════════════════════════════════════════════════════
 //  SIDEBAR DE CANTADOS
@@ -1291,7 +1290,8 @@ function addCalledGhost(name) {
   barInner.appendChild(btag);
 
   _render();
-  _checkBingo();
+  // Verificar si cantar este fantasma completó un bingo
+  if (typeof window._checkBingo === 'function') window._checkBingo();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1358,6 +1358,8 @@ window.setGameOver       = setGameOver;
 //  AUTENTICACION TWITCH
 // ══════════════════════════════════════════════════════════════════
 
+
+  
 document.getElementById('twitch-login-btn').onclick = function() {
   if (pathToken) {
     sessionStorage.setItem('pb_return_token', pathToken);
@@ -1546,16 +1548,22 @@ function showBoard(seed, username, markedArr, isReadOnly, token, authUsername, s
   }
 
   // Validar bingo en el backend
+  // Líneas de bingo ya validadas para no reenviarlas
+  const validatedBingoLines = new Set();
+
   async function validateBingo(line) {
     if (!token || !authUsername || !sig || isRO) return;
-    // Verificar que TODAS las celdas de la línea sean verdes (cantadas) o LIBRE
-    // antes de enviar al backend — evita falsos bingos con celdas rojas
+    // Solo enviar si TODAS las celdas son verdes (cantadas) o LIBRE
     const allValid = line.every(idx => {
       const ghost = cells[idx];
       if (ghost === FREE) return true;
       return marked.has(idx) && calledGhosts.has(ghost);
     });
     if (!allValid) return;
+    // Evitar reenviar la misma línea
+    const key = line.join(',');
+    if (validatedBingoLines.has(key)) return;
+    validatedBingoLines.add(key);
     try {
       const res  = await fetch(
         BACKEND + '/api/session/' + token + '/bingo?u=' + encodeURIComponent(authUsername) + '&sig=' + sig,
@@ -1571,22 +1579,15 @@ function showBoard(seed, username, markedArr, isReadOnly, token, authUsername, s
       }
     } catch (err) {
       console.error('[Bingo] Error validando bingo:', err);
+      // Si falló el envío, eliminar de validadas para poder reintentar
+      validatedBingoLines.delete(key);
     }
   }
 
-  // Guarda las líneas de bingo ya validadas para no reenviarlas
-  const validatedBingoLines = new Set();
-
-  function checkBingoAfterRender() {
+  function checkBingoLines() {
     if (isRO) return;
     const newLines = getBingoLines(marked, cells);
-    newLines.forEach(line => {
-      const key = line.join(',');
-      if (!validatedBingoLines.has(key)) {
-        validatedBingoLines.add(key);
-        validateBingo(line);
-      }
-    });
+    newLines.forEach(line => validateBingo(line));
   }
 
   function render() {
@@ -1613,7 +1614,7 @@ function showBoard(seed, username, markedArr, isReadOnly, token, authUsername, s
           if (marked.has(i)) marked.delete(i); else marked.add(i);
           saveProgress();
           render();
-          checkBingoAfterRender();
+          checkBingoLines();
         };
       }
       gridEl.appendChild(div);
@@ -1629,7 +1630,8 @@ function showBoard(seed, username, markedArr, isReadOnly, token, authUsername, s
 
   render();
   _render = render;
-  _checkBingo = checkBingoAfterRender;
+  // Conectar checkBingoLines para que addCalledGhost lo llame
+  window._checkBingo = checkBingoLines;
 
   document.getElementById('share-btn').onclick = () => {
     const url = BACKEND + '/' + (token || '');
