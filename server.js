@@ -1,13 +1,13 @@
 require('dotenv').config();
 const express          = require('express');
 const http             = require('http');
-const { Server }       = require('socket.io');
-const cors             = require('cors');
-const helmet           = require('helmet');
-const crypto           = require('crypto');
-const { nanoid }       = require('nanoid');
-const tmi              = require('tmi.js');
-const axios            = require('axios');
+const { Server }      = require('socket.io');
+const cors            = require('cors');
+const helmet          = require('helmet');
+const crypto          = require('crypto');
+const { nanoid }      = require('nanoid');
+const tmi             = require('tmi.js');
+const axios           = require('axios');
 const { createClient } = require('@supabase/supabase-js');
 
 const app    = express();
@@ -20,14 +20,18 @@ app.use(express.json());
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
+function normalizeUsername(username) {
+  return String(username || '').trim().toLowerCase();
+}
+
 function signToken(token, username) {
-  return crypto.createHmac('sha256', process.env.HMAC_SECRET).update(token + username).digest('hex').slice(0, 16);
+  return crypto.createHmac('sha256', process.env.HMAC_SECRET).update(token + normalizeUsername(username)).digest('hex').slice(0, 16);
 }
 
 function verifyToken(token, username, sig) {
   if (!token || !username || !sig) return false;
   const expected = signToken(token, username);
-  try { return crypto.timingSafeEqual(Buffer.from(sig.padEnd(16, '0')), Buffer.from(expected)); }
+  try { return crypto.timingSafeEqual(Buffer.from(String(sig).padEnd(16, '0')), Buffer.from(expected)); }
   catch { return false; }
 }
 
@@ -65,30 +69,99 @@ const GHOST_ALIASES = {
 
 async function getAppToken() {
   const res = await axios.post('https://id.twitch.tv/oauth2/token', null, {
-    params: { client_id: process.env.TWITCH_CLIENT_ID, client_secret: process.env.TWITCH_CLIENT_SECRET, grant_type: 'client_credentials' }
+    params: {
+      client_id: process.env.TWITCH_CLIENT_ID,
+      client_secret: process.env.TWITCH_CLIENT_SECRET,
+      grant_type: 'client_credentials'
+    }
   });
   appAccessToken = res.data.access_token;
-  console.log('[Twitch] App token obtenido');
+  return appAccessToken;
 }
 
 async function twitchGet(url, params) {
-  return axios.get(url, { params, headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID, 'Authorization': 'Bearer ' + appAccessToken } }).catch(() => null);
+  if (!appAccessToken) await getAppToken();
+  const headers = {
+    'Client-ID': process.env.TWITCH_CLIENT_ID,
+    'Authorization': 'Bearer ' + appAccessToken
+  };
+  try {
+    return await axios.get(url, { params, headers });
+  } catch (err) {
+    if (err.response?.status === 401) {
+      await getAppToken();
+      headers.Authorization = 'Bearer ' + appAccessToken;
+      return await axios.get(url, { params, headers });
+    }
+    throw err;
+  }
 }
 
 async function getUserId(username) {
   const res = await twitchGet('https://api.twitch.tv/helix/users', { login: username });
-  return res?.data?.data?.[0]?.id || null;
+  return res.data.data?.[0]?.id || null;
 }
 
-let cachedChannelId = null;
 async function getChannelId() {
-  if (cachedChannelId) return cachedChannelId;
-  cachedChannelId = await getUserId(process.env.TWITCH_CHANNEL);
-  return cachedChannelId;
+  const res = await twitchGet('https://api.twitch.tv/helix/users', { login: process.env.TWITCH_CHANNEL });
+  return res.data.data?.[0]?.id || null;
 }
 
-let broadcasterToken = null;
-let broadcasterRefreshToken = null;
+async function validateUserSubscription(userId, channelId) {
+  try {
+    const res = await twitchGet('https://api.twitch.tv/helix/subscriptions/user', {
+      broadcaster_id: channelId,
+      user_id: userId
+    });
+    return (res.data.data?.length || 0) > 0;
+  } catch { return false; }
+}
+
+async function validateFollow(userId, channelId) {
+  try {
+    const res = await twitchGet('https://api.twitch.tv/helix/channels/followers', {
+      broadcaster_id: channelId,
+      user_id: userId
+    });
+    if (!res.data.data?.length) return false;
+    const followedAt = new Date(res.data.data[0].followed_at);
+    const months = (Date.now() - followedAt.getTime()) / (1000 * 60 * 60 * 24 * 30.44);
+    return months >= 3;
+  } catch { return false; }
+}
+
+async function checkEligibility(username) {
+  try {
+    const [userId, channelId] = await Promise.all([getUserId(username), getChannelId()]);
+    if (!userId || !channelId) return false;
+    return (await validateUserSubscription(userId, channelId)) || (await validateFollow(userId, channelId));
+  } catch (err) {
+    console.error('[Bot] Error validando elegibilidad:', err.message);
+    return false;
+  }
+}
+
+async function isModOrBroadcaster(username) {
+  const lower   = username.toLowerCase();
+  const channel = process.env.TWITCH_CHANNEL.toLowerCase();
+  if (lower === channel) return true;
+  try {
+    const res = await twitchGet('https://api.twitch.tv/helix/moderation/moderators', {
+      broadcaster_id: await getChannelId(),
+      user_id: await getUserId(lower)
+    });
+    return (res.data.data || []).some(u => u.user_login.toLowerCase() === lower);
+  } catch { return false; }
+}
+
+async function saveBroadcasterToken(username, accessToken, refreshToken) {
+  const { data: existing } = await supabase.from('broadcaster_token').select('id').eq('username', username).maybeSingle();
+  if (existing) {
+    await supabase.from('broadcaster_token').update({ access_token: accessToken, refresh_token: refreshToken, updated_at: new Date().toISOString() }).eq('username', username);
+  } else {
+    await supabase.from('broadcaster_token').insert({ username, access_token: accessToken, refresh_token: refreshToken });
+  }
+}
 
 async function loadBroadcasterToken() {
   const { data, error } = await supabase.from('broadcaster_token').select('*').limit(1);
@@ -124,81 +197,8 @@ async function refreshBroadcasterToken(row) {
     broadcasterToken = res.data.access_token;
     broadcasterRefreshToken = res.data.refresh_token;
     await supabase.from('broadcaster_token').update({ access_token: broadcasterToken, refresh_token: broadcasterRefreshToken, updated_at: new Date().toISOString() }).eq('username', row.username);
-    console.log('[Auth] Token del broadcaster refrescado correctamente');
-  } catch (err) {
-    console.error('[Auth] Error refrescando token:', err.message);
-    console.log('[Auth] El streamer necesita re-autorizar en: https://phasmobingo.ddnsfree.com/auth/twitch?role=broadcaster');
-  }
-}
-
-async function saveBroadcasterToken(username, accessToken, refreshToken) {
-  const { data: existing } = await supabase.from('broadcaster_token').select('id').eq('username', username).maybeSingle();
-  if (existing) {
-    await supabase.from('broadcaster_token').update({ access_token: accessToken, refresh_token: refreshToken, updated_at: new Date().toISOString() }).eq('username', username);
-  } else {
-    await supabase.from('broadcaster_token').insert({ username, access_token: accessToken, refresh_token: refreshToken });
-  }
-  broadcasterToken = accessToken;
-  broadcasterRefreshToken = refreshToken;
-  console.log('[Auth] Token del broadcaster guardado en Supabase');
-}
-
-async function checkEligibility(username) {
-  try {
-    if (!broadcasterToken) { console.warn('[Eligibility] No hay token del broadcaster'); return false; }
-    const [userId, channelId] = await Promise.all([getUserId(username), getChannelId()]);
-    if (!userId || !channelId) return false;
-    const subRes = await axios.get('https://api.twitch.tv/helix/subscriptions/user', {
-      params: { broadcaster_id: channelId, user_id: userId },
-      headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID, 'Authorization': 'Bearer ' + broadcasterToken }
-    }).catch(() => null);
-    if (subRes?.data?.data?.length > 0) return true;
-    const followRes = await axios.get('https://api.twitch.tv/helix/channels/followers', {
-      params: { broadcaster_id: channelId, user_id: userId },
-      headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID, 'Authorization': 'Bearer ' + broadcasterToken }
-    }).catch(() => null);
-    if (!followRes?.data?.data?.length) return false;
-    const followedAt = new Date(followRes.data.data[0].followed_at);
-    const monthsDiff = (Date.now() - followedAt.getTime()) / (1000 * 60 * 60 * 24 * 30);
-    return monthsDiff >= 3;
-  } catch (err) { console.error('[Eligibility] Error:', err.message); return false; }
-}
-
-async function isModOrBroadcaster(username) {
-  const lower   = username.toLowerCase();
-  const channel = process.env.TWITCH_CHANNEL.toLowerCase();
-
-  // El streamer siempre tiene permiso
-  if (lower === channel) return true;
-
-  // Lista de mods autorizados manualmente
-  const MODS_AUTORIZADOS = [
-    'lecarletti'
-    // agrega mas mods aqui si es necesario
-  ];
-  if (MODS_AUTORIZADOS.includes(lower)) return true;
-
-  if (!broadcasterToken) { console.warn('[Mod] No hay token del broadcaster.'); return false; }
-  try {
-    const [userId, channelId] = await Promise.all([getUserId(lower), getChannelId()]);
-    if (!userId || !channelId) return false;
-    const res = await axios.get('https://api.twitch.tv/helix/moderation/moderators', {
-      params: { broadcaster_id: channelId, user_id: userId },
-      headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID, 'Authorization': 'Bearer ' + broadcasterToken }
-    }).catch(() => null);
-    return (res?.data?.data?.length || 0) > 0;
-  } catch (err) { console.error('[Mod] Error:', err.message); return false; }
-}
-
-let currentStream = null;
-
-async function loadCurrentStream() {
-  const { data, error } = await supabase.from('streams').select('*').eq('status', 'active').limit(1);
-  if (error) { console.error('[Stream] Error:', error.message); return; }
-  const row = data?.[0];
-  if (!row) { console.log('[Stream] No hay stream activo'); return; }
-  currentStream = { stream_id: row.stream_id, bingos_won: row.bingos_won, called_ghosts: row.called_ghosts || [] };
-  console.log('[Stream] Stream activo encontrado:', row.stream_id);
+    console.log('[Auth] Token del broadcaster refrescado');
+  } catch (err) { console.error('[Auth] Error refrescando token:', err.message); }
 }
 
 async function getLeaderboard() {
@@ -215,6 +215,10 @@ async function addPoints(username, points) {
   }
 }
 
+let broadcasterToken = null;
+let broadcasterRefreshToken = null;
+let currentStream = null;
+
 const botClient = new tmi.Client({
   options: { debug: false },
   identity: { username: process.env.TWITCH_BOT_USERNAME, password: 'oauth:' + process.env.TWITCH_BOT_OAUTH },
@@ -222,13 +226,13 @@ const botClient = new tmi.Client({
 });
 
 function say(msg) {
-  botClient.say(process.env.TWITCH_CHANNEL, msg).catch(err => console.error('[Bot] Error:', err.message));
+  botClient.say('#' + process.env.TWITCH_CHANNEL, msg);
 }
 
 botClient.on('message', async (channel, tags, message, self) => {
   if (self) return;
   const displayName = tags['display-name'] || tags.username;
-  const username    = displayName.toLowerCase();
+  const username    = normalizeUsername(displayName);
   const msg         = message.trim().toLowerCase();
 
   if (msg === '!phasmobingo') {
@@ -251,69 +255,50 @@ botClient.on('message', async (channel, tags, message, self) => {
     return;
   }
 
-  const specialCmds = ['!pbtabla', '!pbborrar', '!pbstart', '!pbend'];
-  if (msg.startsWith('!pb') && msg.length > 3 && !specialCmds.includes(msg)) {
+  const ghost = GHOST_ALIASES[msg];
+  if (ghost) {
     const isMod = await isModOrBroadcaster(username);
-    if (!isMod) return;
-    if (!currentStream) { say('No hay ningun bingo activo.'); return; }
-    if (currentStream.bingos_won >= 2) { say('El bingo ya finalizo, no se pueden cantar mas fantasmas.'); return; }
-
-    const ghostKey = msg.slice(3).trim();
-    const ghost    = GHOST_ALIASES[ghostKey];
-
-    if (!ghost) {
-      say('Fantasma no reconocido: ' + ghostKey + '. Usa uno de los 24 fantasmas del tablero.');
-      return;
-    }
-
+    if (!isMod) { say('@' + displayName + ', solo moderadores o el broadcaster pueden cantar fantasmas.'); return; }
+    if (!currentStream) { say('No hay stream activo.'); return; }
     if (currentStream.called_ghosts.map(g => g.toLowerCase()).includes(ghost.toLowerCase())) { say(ghost + ' ya fue cantado anteriormente.'); return; }
     currentStream.called_ghosts.push(ghost);
-    const { error } = await supabase.from('streams').update({ called_ghosts: currentStream.called_ghosts }).eq('stream_id', currentStream.stream_id);
-    if (error) { console.error('[Bot] Error guardando fantasma:', error.message); return; }
-    io.emit('ghost_called', { name: ghost, order: currentStream.called_ghosts.length });
-    say(ghost + ' cantado! (#' + currentStream.called_ghosts.length + ')');
+    await supabase.from('streams').update({ called_ghosts: currentStream.called_ghosts }).eq('stream_id', currentStream.stream_id);
+    io.emit('ghost_caught', ghost);
+    say(ghost + ' cantado correctamente.');
     return;
   }
 
-  if (msg === '!pbtabla') {
+  if (msg === '!leaderboard') {
     const board = await getLeaderboard();
-    if (!board.length) { say('La tabla de posiciones esta vacia.'); return; }
-    const medals = ['1o', '2o', '3o'];
+    const medals = ['🥇', '🥈', '🥉'];
     say('Tabla de Posiciones: ' + board.map((r, i) => (medals[i] || (i + 1) + 'o') + ' ' + r.username + ' - ' + r.points + ' pts').join(' | '));
-    return;
-  }
-
-  if (msg === '!pbborrar') {
-    const isMod = await isModOrBroadcaster(username);
-    if (!isMod) return;
-    const { error } = await supabase.from('leaderboard').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    if (error) { console.error('[Bot] Error borrando leaderboard:', error.message); return; }
-    io.emit('leaderboard_reset');
-    say('La tabla de posiciones ha sido reiniciada.');
-    return;
-  }
-
-  if (msg === '!pbstart') {
-    const isMod = await isModOrBroadcaster(username);
-    if (!isMod) return;
-    if (currentStream) { say('Ya hay un bingo activo.'); return; }
-    const stream_id = 'stream_' + Date.now();
-    const { error } = await supabase.from('streams').insert({ stream_id, status: 'active', called_ghosts: [], bingos_won: 0 });
-    if (error) { console.error('[Bot] Error iniciando stream:', error.message); return; }
-    currentStream = { stream_id, bingos_won: 0, called_ghosts: [] };
-    say('PhasmoBingo iniciado! Escribe !phasmobingo para obtener tu tablon.');
     return;
   }
 
   if (msg === '!pbend') {
     const isMod = await isModOrBroadcaster(username);
-    if (!isMod) return;
-    if (!currentStream) { say('No hay ningun bingo activo.'); return; }
-    await supabase.from('streams').update({ status: 'ended', ended_at: new Date().toISOString() }).eq('stream_id', currentStream.stream_id);
-    await supabase.from('sessions').update({ status: 'expired' }).eq('stream_id', currentStream.stream_id);
-    io.emit('stream_ended');
-    currentStream = null;
-    say('PhasmoBingo finalizado. Hasta el proximo stream!');
+    if (!isMod) { say('@' + displayName + ', solo moderadores pueden finalizar el bingo.'); return; }
+    if (currentStream) await endStream();
+    return;
+  }
+
+  if (msg === '!pbreset') {
+    const isMod = await isModOrBroadcaster(username);
+    if (!isMod) { say('@' + displayName + ', solo moderadores pueden reiniciar el bingo.'); return; }
+    if (!currentStream) { say('No hay bingo activo.'); return; }
+    currentStream.called_ghosts = [];
+    currentStream.bingos_won = 0;
+    await supabase.from('streams').update({ called_ghosts: [], bingos_won: 0 }).eq('stream_id', currentStream.stream_id);
+    say('Bingo reiniciado.');
+    io.emit('reset_board');
+    return;
+  }
+
+  if (msg === '!pbsync') {
+    const isMod = await isModOrBroadcaster(username);
+    if (!isMod) { say('@' + displayName + ', solo moderadores pueden sincronizar.'); return; }
+    await syncCurrentStream();
+    say('Sincronizacion completada.');
     return;
   }
 });
@@ -323,8 +308,9 @@ botClient.on('disconnected', reason => console.warn('[Bot] Desconectado:', reaso
 
 app.get('/api/sign', (req, res) => {
   const { token, u: username } = req.query;
-  if (!token || !username) return res.status(400).json({ error: 'Faltan parametros' });
-  res.json({ sig: signToken(token, username) });
+  const normalizedUsername = normalizeUsername(username);
+  if (!token || !normalizedUsername) return res.status(400).json({ error: 'Faltan parametros' });
+  res.json({ sig: signToken(token, normalizedUsername) });
 });
 
 app.get('/auth/twitch', (req, res) => {
@@ -344,15 +330,23 @@ app.get('/auth/callback', async (req, res) => {
   const returnTo = state ? (state.split('|')[1] || '') : '';
   try {
     const tokenRes = await axios.post('https://id.twitch.tv/oauth2/token', null, {
-      params: { client_id: process.env.TWITCH_CLIENT_ID, client_secret: process.env.TWITCH_CLIENT_SECRET, code, grant_type: 'authorization_code', redirect_uri: 'https://' + process.env.FRONTEND_URL + '/auth/callback' }
+      params: {
+        client_id: process.env.TWITCH_CLIENT_ID,
+        client_secret: process.env.TWITCH_CLIENT_SECRET,
+        code,
+        grant_type: 'authorization_code',
+        redirect_uri: 'https://' + process.env.FRONTEND_URL + '/auth/callback'
+      }
     });
-    const accessToken  = tokenRes.data.access_token;
+    const accessToken = tokenRes.data.access_token;
     const refreshToken = tokenRes.data.refresh_token;
-    const userRes = await axios.get('https://api.twitch.tv/helix/users', { headers: { 'Authorization': 'Bearer ' + accessToken, 'Client-ID': process.env.TWITCH_CLIENT_ID } });
+    const userRes = await axios.get('https://api.twitch.tv/helix/users', {
+      headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID, 'Authorization': 'Bearer ' + accessToken }
+    });
     const username = userRes.data.data[0].login.toLowerCase();
     if (username === process.env.TWITCH_CHANNEL.toLowerCase()) {
       await saveBroadcasterToken(username, accessToken, refreshToken);
-      return res.redirect('https://computinworks.github.io/phasmobingo/?auth=broadcaster_ok');
+      return res.redirect('https://computinworks.github.io/phasmobingo/' + returnTo + '?auth=ok&role=broadcaster');
     }
     return res.redirect('https://computinworks.github.io/phasmobingo/' + returnTo + '?auth=ok&u=' + username);
   } catch (err) {
@@ -364,13 +358,14 @@ app.get('/auth/callback', async (req, res) => {
 app.get('/api/session/:token', async (req, res) => {
   const { token } = req.params;
   const { u: username, sig } = req.query;
+  const normalizedUsername = normalizeUsername(username);
   if (!token) return res.json({ status: 'invalid' });
   const { data: session, error } = await supabase.from('sessions').select('*').eq('token', token).maybeSingle();
   if (error || !session) return res.json({ status: 'invalid' });
-  if (!username || !sig || !verifyToken(token, username, sig)) return res.json({ status: 'invalid' });
+  if (!normalizedUsername || !sig || !verifyToken(token, normalizedUsername, sig)) return res.json({ status: 'invalid' });
   if (session.status === 'expired') return res.json({ status: 'expired' });
   const { data: stream } = await supabase.from('streams').select('*').eq('stream_id', session.stream_id).maybeSingle();
-  const isOwner   = username.toLowerCase() === session.username.toLowerCase();
+  const isOwner   = normalizedUsername === normalizeUsername(session.username);
   const gameEnded = (stream?.bingos_won || 0) >= 2;
   return res.json({ status: session.status, username: session.username, seed: session.seed, marked: session.marked || [], called_ghosts: stream?.called_ghosts || [], leaderboard: await getLeaderboard(), isOwner, gameEnded });
 });
@@ -378,10 +373,11 @@ app.get('/api/session/:token', async (req, res) => {
 app.post('/api/session/:token/progress', async (req, res) => {
   const { token } = req.params;
   const { u: username, sig } = req.query;
+  const normalizedUsername = normalizeUsername(username);
   const { marked } = req.body;
-  if (!verifyToken(token, username, sig)) return res.status(403).json({ error: 'Firma invalida' });
+  if (!verifyToken(token, normalizedUsername, sig)) return res.status(403).json({ error: 'Firma invalida' });
   if (!Array.isArray(marked)) return res.status(400).json({ error: 'Formato invalido' });
-  const { error } = await supabase.from('sessions').update({ marked }).eq('token', token).eq('username', username.toLowerCase());
+  const { error } = await supabase.from('sessions').update({ marked }).eq('token', token).eq('username', normalizedUsername);
   if (error) return res.status(500).json({ error: 'Error guardando progreso' });
   return res.json({ ok: true });
 });
@@ -389,8 +385,9 @@ app.post('/api/session/:token/progress', async (req, res) => {
 app.post('/api/session/:token/bingo', async (req, res) => {
   const { token } = req.params;
   const { u: username, sig } = req.query;
+  const normalizedUsername = normalizeUsername(username);
   const { line, cells } = req.body;
-  if (!verifyToken(token, username, sig)) return res.status(403).json({ error: 'Firma invalida' });
+  if (!verifyToken(token, normalizedUsername, sig)) return res.status(403).json({ error: 'Firma invalida' });
   if (!Array.isArray(line) || !Array.isArray(cells)) return res.status(400).json({ error: 'Formato invalido' });
   if (!currentStream || currentStream.bingos_won >= 2) return res.json({ valid: false, reason: 'Bingo no activo o ya finalizado' });
   const { data: session } = await supabase.from('sessions').select('*').eq('token', token).maybeSingle();
@@ -420,24 +417,44 @@ app.post('/api/session/:token/bingo', async (req, res) => {
   return res.json({ valid: true, points, bingoNumber });
 });
 
-app.get('/api/leaderboard', async (req, res) => res.json(await getLeaderboard()));
-
-io.on('connection', socket => {
-  console.log('[WS] Cliente conectado:', socket.id);
-  socket.on('disconnect', () => console.log('[WS] Cliente desconectado:', socket.id));
+app.get('/api/leaderboard', async (req, res) => {
+  return res.json({ leaderboard: await getLeaderboard() });
 });
 
-async function start() {
-  try {
-    await getAppToken();
-    await loadBroadcasterToken();
-    await loadCurrentStream();
-    await botClient.connect();
-    server.listen(process.env.PORT || 3000, () => console.log('[Server] Corriendo en puerto ' + (process.env.PORT || 3000)));
-  } catch (err) {
-    console.error('[Start] Error iniciando servidor:', err.message);
-    process.exit(1);
-  }
+async function syncCurrentStream() {
+  if (!currentStream) return;
+  const { data } = await supabase.from('streams').select('*').eq('stream_id', currentStream.stream_id).maybeSingle();
+  if (!data) return;
+  currentStream.called_ghosts = data.called_ghosts || [];
+  currentStream.bingos_won = data.bingos_won || 0;
 }
 
-start();
+async function startNewStream(stream_id) {
+  currentStream = { stream_id, called_ghosts: [], bingos_won: 0 };
+  await supabase.from('streams').upsert({ stream_id, called_ghosts: [], bingos_won: 0 });
+  io.emit('new_stream', { stream_id });
+}
+
+async function endStream() {
+  if (!currentStream) return;
+  await supabase.from('sessions').update({ status: 'expired' }).eq('stream_id', currentStream.stream_id);
+  io.emit('game_over');
+  currentStream = null;
+  say('PhasmoBingo finalizado. Hasta el proximo stream!');
+}
+
+setInterval(async () => {
+  try {
+    if (!currentStream) return;
+    const { data } = await supabase.from('streams').select('*').eq('stream_id', currentStream.stream_id).maybeSingle();
+    if (!data) return;
+    currentStream.called_ghosts = data.called_ghosts || [];
+    currentStream.bingos_won = data.bingos_won || 0;
+  } catch {}
+}, 15000);
+
+server.listen(process.env.PORT || 3000, async () => {
+  console.log('Servidor listo en puerto ' + (process.env.PORT || 3000));
+  await loadBroadcasterToken();
+  await botClient.connect();
+});

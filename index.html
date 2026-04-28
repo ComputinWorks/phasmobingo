@@ -1170,6 +1170,10 @@ if (_redirect) {
 
 const BACKEND = 'https://phasmobingo.ddnsfree.com';
 
+function normalizeUsername(username) {
+  return String(username || '').trim().toLowerCase();
+}
+
 // Token del tablón — viene en el path: phasmobingo.ddnsfree.com/TOKEN
 const pathToken = window.location.pathname.replace(/^\//, '').split('?')[0];
 
@@ -1379,7 +1383,7 @@ function initPage() {
   // ── Regreso de OAuth de Twitch ──
   if (authStatus === 'ok' && authUser) {
     // Guardar el username autenticado
-    sessionStorage.setItem('pb_twitch_user', authUser);
+    sessionStorage.setItem('pb_twitch_user', normalizeUsername(authUser));
 
     // Recuperar el token al que volver
     const returnToken = sessionStorage.getItem('pb_return_token') || pathToken;
@@ -1388,7 +1392,7 @@ function initPage() {
     if (returnToken) {
       // Limpiar la URL y cargar el tablón
       history.replaceState(null, '', '/' + returnToken);
-      loadSession(returnToken, authUser);
+      loadSession(returnToken, normalizeUsername(authUser));
     } else {
       showInvalidScreen();
     }
@@ -1406,7 +1410,7 @@ function initPage() {
     return;
   }
 
-  const savedUser = sessionStorage.getItem('pb_twitch_user');
+  const savedUser = normalizeUsername(sessionStorage.getItem('pb_twitch_user'));
 
   if (!savedUser) {
     // No hay sesión de Twitch guardada — pedir login
@@ -1418,11 +1422,13 @@ function initPage() {
 }
 
 async function loadSession(token, username) {
+  const normalizedUsername = normalizeUsername(username);
+
   // Generar firma para autenticar la petición
-  const sig = await generateSig(token, username);
+  const sig = await generateSig(token, normalizedUsername);
 
   try {
-    const res  = await fetch(BACKEND + '/api/session/' + token + '?u=' + encodeURIComponent(username) + '&sig=' + sig);
+    const res  = await fetch(BACKEND + '/api/session/' + token + '?u=' + encodeURIComponent(normalizedUsername) + '&sig=' + sig);
     const data = await res.json();
 
     if (data.status === 'invalid')   { showInvalidScreen(); return; }
@@ -1438,11 +1444,11 @@ async function loadSession(token, username) {
       updateLeaderboard(data.leaderboard);
     }
 
-    const isOwner   = username.toLowerCase() === data.username.toLowerCase();
+    const isOwner   = normalizedUsername === normalizeUsername(data.username);
     const isRO      = !isOwner || data.gameEnded || data.status === 'readonly';
 
-    showBoard(data.seed, data.username, data.marked, isRO, token, username, sig);
-    connectSocket(token, username, sig);
+    showBoard(data.seed, data.username, data.marked, isRO, token, normalizedUsername, sig);
+    connectSocket(token, normalizedUsername, sig);
 
   } catch (err) {
     console.error('[Load] Error cargando sesión:', err);
@@ -1453,10 +1459,11 @@ async function loadSession(token, username) {
 // Genera una firma HMAC-SHA256 usando la Web Crypto API del navegador
 // Nota: el HMAC_SECRET no se expone al frontend — la firma se pide al backend
 async function generateSig(token, username) {
+  const normalizedUsername = normalizeUsername(username);
   try {
-    const res  = await fetch(BACKEND + '/api/sign?token=' + token + '&u=' + encodeURIComponent(username));
+    const res  = await fetch(BACKEND + '/api/sign?token=' + token + '&u=' + encodeURIComponent(normalizedUsername));
     const data = await res.json();
-    return data.sig;
+    return data.sig || '';
   } catch {
     return '';
   }
@@ -1476,11 +1483,11 @@ if (document.getElementById('start-btn')) {
 }
 
 function startBoard() {
-  const name = usernameInput ? usernameInput.value.trim() : '';
+  const name = normalizeUsername(usernameInput ? usernameInput.value.trim() : '');
   const ns   = Math.random().toString(36).slice(2, 10);
   const url  = new URL(window.location);
   url.searchParams.set('seed', ns);
-  if (name) url.searchParams.set('user', encodeURIComponent(name));
+  if (name) url.searchParams.set('user', name);
   else      url.searchParams.delete('user');
   history.replaceState(null, '', url);
   showBoard(ns, name, null, false);
