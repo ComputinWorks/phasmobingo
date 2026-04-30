@@ -166,10 +166,11 @@
 
     .screen h1 {
       font-family: var(--font-title);
-      font-size: clamp(32px, 8vw, 54px);
+      font-size: clamp(28px, 6vw, 54px);
       font-weight: normal;
       letter-spacing: 0.08em;
       line-height: 1.1;
+      white-space: nowrap;
       color: #e0d8f8;
       text-shadow: 0 0 30px rgba(140,120,255,0.4), 0 0 60px rgba(100,80,220,0.2);
     }
@@ -368,7 +369,7 @@
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow: hidden;
-      height: min(calc(100dvh - 250px), calc(100vw - var(--sidebar-w) * 2 - 60px));
+      height: min(calc(100dvh - 330px), calc(100vw - var(--sidebar-w) * 2 - 60px));
     }
 
     #called-sidebar .sb-header {
@@ -501,7 +502,7 @@
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow: hidden;
-      height: min(calc(100dvh - 250px), calc(100vw - var(--sidebar-w) * 2 - 60px));
+      height: min(calc(100dvh - 330px), calc(100vw - var(--sidebar-w) * 2 - 60px));
     }
     #leaderboard-sidebar .sb-header {
       flex: 0 0 auto;
@@ -661,7 +662,7 @@
         Total a restar: ~250px
       */
       --grid-size: min(
-        calc(100dvh - 250px),
+        calc(100dvh - 330px),
         calc(100vw - var(--sidebar-w) * 2 - 60px)
       );
       width:  var(--grid-size);
@@ -923,7 +924,7 @@
 <div id="app">
 
 <div id="screen-auth" class="screen">
-  <h1>Phasmo<br>Bingo</h1>
+  <h1>PhasmoBingo</h1>
   <p class="subtitle">TheLothricTV</p>
   <p class="msg">Para acceder a tu tabl&oacute;n necesitas verificar tu identidad con tu cuenta de Twitch.</p>
   <button class="btn-primary" id="twitch-login-btn">
@@ -937,7 +938,7 @@
 
 <!-- ========= PANTALLA: LINK EXPIRADO ========= -->
 <div id="screen-expired" class="screen screen-danger">
-  <h1>Phasmo<br>Bingo</h1>
+  <h1>PhasmoBingo</h1>
   <p class="subtitle">TheLothricTV</p>
   <div class="status-icon">🕯️</div>
   <p class="msg">Este link ya no est&aacute; activo.<br><strong>El stream en el que fue generado ha finalizado.</strong><br><br>Cuando comience el pr&oacute;ximo stream, escribe <strong>!phasmobingo</strong> en el chat para obtener un nuevo tabl&oacute;n.</p>
@@ -946,7 +947,7 @@
 
 <!-- ========= PANTALLA: LINK INVÁLIDO ========= -->
 <div id="screen-invalid" class="screen screen-danger">
-  <h1>Phasmo<br>Bingo</h1>
+  <h1>PhasmoBingo</h1>
   <p class="subtitle">TheLothricTV</p>
   <div class="status-icon">👻</div>
   <p class="msg">Este link no existe.<br><strong>No se encontr&oacute; ning&uacute;n tabl&oacute;n asociado a esta direcci&oacute;n.</strong><br><br>Para participar, escribe <strong>!phasmobingo</strong> en el chat de Twitch durante el stream.</p>
@@ -955,7 +956,7 @@
 
 <!-- ========= PANTALLA: BINGO FINALIZADO ========= -->
 <div id="screen-ended" class="screen screen-ended">
-  <h1>Phasmo<br>Bingo</h1>
+  <h1>PhasmoBingo</h1>
   <p class="subtitle">TheLothricTV</p>
   <div class="status-icon">🏆</div>
   <p class="msg"><strong>El bingo de este stream ya finaliz&oacute;.</strong><br><br>Se completaron los 2 bingos disponibles.<br>El pr&oacute;ximo stream habr&aacute; un nuevo bingo.</p>
@@ -964,7 +965,7 @@
 
 <!-- ========= BIENVENIDA (debug) ========= -->
 <div id="welcome">
-  <h1>Phasmo<br>Bingo</h1>
+  <h1>PhasmoBingo</h1>
   <p class="subtitle">Cazadores de Fantasmas</p>
   <input type="text" id="username-input" placeholder="Tu nombre..."
          maxlength="30" autocomplete="off" autocorrect="off"
